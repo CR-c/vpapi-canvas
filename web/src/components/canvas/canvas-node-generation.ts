@@ -1,6 +1,5 @@
 import type { AiTextMessage } from "@/services/api/image";
 import i18n from "@/i18n";
-import { imageReferenceLabel } from "@/lib/image-reference-prompt";
 import type { ReferenceImage } from "@/types/image";
 import type { ReferenceAudio, ReferenceVideo } from "@/types/media";
 import { CanvasNodeType, type CanvasConnection, type CanvasNodeData } from "@/types/canvas";
@@ -173,7 +172,13 @@ export function buildNodeResponseMessages(context: NodeGenerationContext): AiTex
 
 export async function hydrateNodeGenerationContext(context: NodeGenerationContext) {
     const { imageToDataUrl } = await import("@/services/image-storage");
-    return { ...context, referenceImages: await Promise.all(context.referenceImages.map(async (image) => ({ ...image, dataUrl: await imageToDataUrl(image) }))) };
+    const { resolveMediaUrl } = await import("@/services/file-storage");
+    return {
+        ...context,
+        referenceImages: await Promise.all(context.referenceImages.map(async (image) => ({ ...image, dataUrl: await imageToDataUrl(image) }))),
+        referenceVideos: await Promise.all(context.referenceVideos.map(async (video) => ({ ...video, url: await resolveMediaUrl(video.storageKey, video.url) }))),
+        referenceAudios: await Promise.all(context.referenceAudios.map(async (audio) => ({ ...audio, url: await resolveMediaUrl(audio.storageKey, audio.url) }))),
+    };
 }
 
 function readNodeTextInput(node: CanvasNodeData) {
@@ -182,9 +187,9 @@ function readNodeTextInput(node: CanvasNodeData) {
 }
 
 function generationLabel(type: NodeGenerationResourceInput["type"], index: number) {
-    if (type === "image") return imageReferenceLabel(index);
-    if (type === "video") return i18n.t("canvas.configNode.videoReferences") + ` ${index + 1}`;
-    if (type === "audio") return i18n.t("canvas.configNode.audioReferences") + ` ${index + 1}`;
+    if (type === "image") return `@图片${index + 1}`;
+    if (type === "video") return `@视频${index + 1}`;
+    if (type === "audio") return `@音频${index + 1}`;
     return i18n.t("canvas.composer.resources.text", { index: index + 1 });
 }
 
