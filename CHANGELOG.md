@@ -7,6 +7,7 @@
 + [新增] 视频时长 / 分辨率按网关 model 的 `video_capabilities` 自动吸附到允许挡位，并在设置面板展示（不再依赖内置关键字规则）。
 + [调整] 移除默认渠道中内置的第三方 API Key，改为由用户填入自己的密钥调用；旧配置迁移为 vpapi 默认渠道。
 + [新增] 根目录 `DEPLOY.md` 提供小白部署指南与“交给 AI 部署”的提示词，纯静态无需后端 / 数据库。
++ [发布] 独立公开仓库 `CR-c/vpapi-canvas` 与该仓库的 Docker 镜像 `ghcr.io/cr-c/vpapi-canvas:latest`（amd64 / arm64），一条 `docker run` 即可部署并直达 vpapi 一键接入。
 + [修复] 视频生成轮询超时从 5 分钟延长到 30 分钟，seedance 等长耗时模型不再被画布误报失败。
 + [修复] zkki 网关参考图托管配额放宽并缩短有效期，多张参考图视频生成不再报 quota exceeded。
 + [调整] 默认视频模型改为 seedance-2.5-c1-K，支持 480p/720p、4-29 秒，带参考图图生视频可用。
