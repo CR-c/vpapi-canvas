@@ -4,7 +4,7 @@ import { nanoid } from "nanoid";
 import i18n from "@/i18n";
 import { uploadMediaFile, type UploadedFile } from "@/services/file-storage";
 import { imageToDataUrl } from "@/services/image-storage";
-import { boolConfig, buildApiUrl, modelOptionName, resolveModelRequestConfig, resolveModelScript, type AiConfig } from "@/stores/use-config-store";
+import { boolConfig, buildApiUrl, modelOptionName, resolveModelRequestConfig, resolveModelScript, resolveModelVideoSpec, videoSpecResolution, videoSpecSeconds, type AiConfig, type ChannelVideoSpec } from "@/stores/use-config-store";
 import { runModelPlugin } from "./model-plugin";
 import type { ReferenceImage } from "@/types/image";
 import type { ReferenceAudio, ReferenceVideo } from "@/types/media";
@@ -73,6 +73,7 @@ export async function pollVideoGenerationTask(config: AiConfig, task: VideoGener
 async function createPluginVideoTask(config: AiConfig, model: string, script: string, prompt: string, references: ReferenceImage[], options?: VideoMediaOptions): Promise<VideoGenerationTask> {
     if (!config.baseUrl.trim()) throw new Error(apiText("baseUrlRequired"));
     if (!config.apiKey.trim()) throw new Error(apiText("apiKeyRequired"));
+    const spec = resolveModelVideoSpec(config, model);
     const refs = await Promise.all(references.map((image) => imageToDataUrl(image)));
     const videos = await Promise.all((options?.videos || []).map((video) => mediaToDataUrl(video.url)));
     const audios = await Promise.all((options?.audios || []).map((audio) => mediaToDataUrl(audio.url)));
@@ -84,9 +85,9 @@ async function createPluginVideoTask(config: AiConfig, model: string, script: st
             prompt,
             images: refs,
             params: {
-                seconds: adaptVideoSeconds(config.videoSeconds, model),
+                seconds: adaptVideoSeconds(config.videoSeconds, model, spec),
                 size: normalizeVideoSize(config.size),
-                resolution: adaptVideoResolution(config.vquality, model),
+                resolution: adaptVideoResolution(config.vquality, model, spec),
                 ratio: config.size,
                 generateAudio: boolConfig(config.videoGenerateAudio, true),
                 watermark: boolConfig(config.videoWatermark, false),
@@ -127,12 +128,13 @@ export async function storeGeneratedVideo(result: VideoGenerationResult): Promis
 
 async function createOpenAIVideoTask(config: AiConfig, model: string, prompt: string, references: ReferenceImage[], options?: VideoMediaOptions): Promise<VideoGenerationTask> {
     const modelName = modelOptionName(model);
+    const spec = resolveModelVideoSpec(config, model);
     const body: Record<string, unknown> = {
         model: modelName,
         prompt,
-        seconds: adaptVideoSeconds(config.videoSeconds, modelName),
+        seconds: adaptVideoSeconds(config.videoSeconds, modelName, spec),
         ...(normalizeVideoSize(config.size) ? { size: normalizeVideoSize(config.size) } : {}),
-        resolution: adaptVideoResolution(config.vquality, modelName),
+        resolution: adaptVideoResolution(config.vquality, modelName, spec),
         preset: "normal",
     };
     // Send typed arrays so @图片N / @视频N / @音频N bind 1:1 on Seedance-style gateways.
@@ -222,21 +224,25 @@ const VIDEO_MODEL_SPECS: Array<{ match: RegExp; minSeconds: number; maxSeconds: 
 ];
 
 function videoModelSpec(model: string) {
-    return VIDEO_MODEL_SPECS.find((spec) => spec.match.test(model)) || { match: /.*/, minSeconds: 1, maxSeconds: 20, fixedSeconds: undefined, defaultResolution: "720p", resolutions: ["480p", "720p", "1080p", "2k", "4k"] };
+    return VIDEO_MODEL_SPECS.find((item) => item.match.test(model)) || { match: /.*/, minSeconds: 1, maxSeconds: 20, fixedSeconds: undefined, defaultResolution: "720p", resolutions: ["480p", "720p", "1080p", "2k", "4k"] };
 }
 
-function adaptVideoSeconds(value: string, model: string) {
-    const spec = videoModelSpec(model);
-    if (spec.fixedSeconds) return String(spec.fixedSeconds);
-    const seconds = Math.floor(Number(value) || spec.minSeconds);
-    return String(Math.max(spec.minSeconds, Math.min(spec.maxSeconds, seconds)));
+function adaptVideoSeconds(value: string, model: string, spec?: ChannelVideoSpec) {
+    const fromGateway = videoSpecSeconds(spec, value);
+    if (fromGateway) return fromGateway;
+    const resolved = videoModelSpec(model);
+    if (resolved.fixedSeconds) return String(resolved.fixedSeconds);
+    const seconds = Math.floor(Number(value) || resolved.minSeconds);
+    return String(Math.max(resolved.minSeconds, Math.min(resolved.maxSeconds, seconds)));
 }
 
-function adaptVideoResolution(value: string, model: string) {
-    const spec = videoModelSpec(model);
+function adaptVideoResolution(value: string, model: string, spec?: ChannelVideoSpec) {
+    const fromGateway = videoSpecResolution(spec, value);
+    if (fromGateway) return fromGateway;
+    const resolved = videoModelSpec(model);
     const normalized = normalizeVideoResolution(value);
-    if (spec.resolutions.includes(normalized)) return normalized;
-    return spec.defaultResolution;
+    if (resolved.resolutions.includes(normalized)) return normalized;
+    return resolved.defaultResolution;
 }
 
 function unwrapVideoResponse(payload: ApiVideoResponse) {

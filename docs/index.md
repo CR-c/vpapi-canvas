@@ -4,6 +4,7 @@
 
 - [Quick Start](/docs/overview/quick-start)
 - [Features](/docs/overview/features)
+- [小白部署指南 `DEPLOY.md`](/DEPLOY.md)
 - [Deploy on Render](/docs/overview/render)
 - [Docker Deployment](/docs/overview/docker)
 - [Third-party Prompt Sources](/docs/overview/third-party-prompt-repositories)

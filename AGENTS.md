@@ -70,6 +70,14 @@
 - 每次任务完成前，都要根据实际变更检查并更新 `docs/content/docs/progress/todo.mdx` 和 `docs/content/docs/progress/pending-test.mdx`；如果功能或待办没有变化，也要确认无需修改。
 - 文档不要写过期日期；除非用户明确要求记录具体时间。
 
+## 部署与接入
+
+- 本项目是纯静态前端：部署 = 起一个网页，不需要数据库、Redis、对象存储或后端服务。
+- 完整、面向小白的部署文档在根目录 `DEPLOY.md`；给用户部署时直接引导其阅读。
+- 模型请求由访问者浏览器前台直连其各自的网关，不要把 API Key 写成环境变量或默认值。
+- 默认预置的 vpapi 渠道指向 `https://api.zkki.net`；用户接入时只填 API Key，画布通过 `GET /v1/models` 自动拉取模型并按网关公布的 `supported_endpoint_types` / `video_capabilities` 识别能力与视频约束。
+- 给用户部署时优先用 Docker 一条命令；用户如果用 AI 部署，可直接把 `DEPLOY.md` 里的提示词段落发给其 AI。
+
 ## 发版本流程
 
 - 发版本时，先把 `CHANGELOG.md` 的 `Unreleased` 变更整理成新的版本记录，并保留空的 `Unreleased` 标题。

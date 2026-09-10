@@ -3,6 +3,7 @@ out/
 node_modules/
 .env*
 !.env.example
+.commandcode/
 data/
 *.log
 *.tsbuildinfo

@@ -1,7 +1,7 @@
 import axios from "axios";
 
 import i18n from "@/i18n";
-import { buildApiUrl, resolveModelRequestConfig, resolveModelScript, type AiConfig, type ModelChannel } from "@/stores/use-config-store";
+import { buildApiUrl, capabilityFromEndpointTypes, guessCapability, normalizeChannelModels, resolveModelRequestConfig, resolveModelScript, type AiConfig, type ChannelModel, type ChannelVideoSpec, type ModelChannel } from "@/stores/use-config-store";
 import { normalizePluginImages, runModelPlugin } from "./model-plugin";
 import { nanoid } from "nanoid";
 import { dataUrlToFile } from "@/lib/image-utils";
@@ -76,6 +76,28 @@ type ImageApiResponse = {
     code?: number;
     msg?: string;
 };
+/** Submit/poll payload of the gateway's asynchronous image contract. */
+type GatewayImageTask = ImageApiResponse & { id?: string; status?: string };
+/** A model entry from the gateway catalog; vpapi additionally publishes capability and video constraints. */
+type GatewayModelEntry = {
+    id?: string;
+    supported_endpoint_types?: string[];
+    video_capabilities?: {
+        profiles?: Array<{
+            durations?: unknown;
+            default_duration?: unknown;
+            resolutions?: unknown;
+            aspect_ratios?: unknown;
+            max_images?: unknown;
+            max_videos?: unknown;
+            max_audios?: unknown;
+            supports_smart_duration?: unknown;
+            supports_first_last_frames?: unknown;
+            supports_generate_audio?: unknown;
+            supports_watermark?: unknown;
+        }>;
+    };
+};
 type GeminiPart = {
     text?: string;
     inlineData?: { mimeType?: string; data?: string };
@@ -121,6 +143,9 @@ const GEMINI_IMAGE_SIZE_BY_QUALITY: Record<string, string> = { low: "1K", medium
 
 function normalizeQuality(quality: string) {
     const value = quality.trim().toLowerCase();
+    // Provider-specific tiers (e.g. dola-seedream gt_236w / le_236w) pass
+    // through as-is; standard tiers map to a pixel base for size resolution.
+    if (value === "gt_236w" || value === "le_236w") return value;
     const normalized = QUALITY_ALIASES[value] || value;
     return QUALITY_BASE[normalized] ? normalized : undefined;
 }
@@ -746,25 +771,23 @@ export async function requestGeneration(config: AiConfig, prompt: string, option
     const quality = normalizeQuality(config.quality);
     const requestSize = resolveRequestSize(quality, config.size);
     const background = normalizeBackground(config.background);
+    const body = {
+        model: requestConfig.model,
+        prompt: withSystemPrompt(requestConfig, prompt),
+        n,
+        ...(quality ? { quality } : {}),
+        ...(requestSize ? { size: requestSize } : {}),
+        ...(background ? { background } : {}),
+        // gpt-image models reject response_format; they always return b64.
+        ...(/gpt-image/.test(requestConfig.model) ? {} : { response_format: "b64_json" }),
+        output_format: IMAGE_OUTPUT_FORMAT,
+    };
     try {
-        const response = await axios.post<ImageApiResponse>(
-            aiApiUrl(requestConfig, "/images/generations"),
-            {
-                model: requestConfig.model,
-                prompt: withSystemPrompt(requestConfig, prompt),
-                n,
-                ...(quality ? { quality } : {}),
-                ...(requestSize ? { size: requestSize } : {}),
-                ...(background ? { background } : {}),
-                // gpt-image models reject response_format; they always return b64.
-                ...(/gpt-image/.test(requestConfig.model) ? {} : { response_format: "b64_json" }),
-                output_format: IMAGE_OUTPUT_FORMAT,
-            },
-            {
-                headers: aiHeaders(requestConfig, "application/json"),
-                signal: options?.signal,
-            },
-        );
+        if (requestConfig.apiFormat === "vpapi") return await requestVpapiImage(requestConfig, "/images/generations", body, options);
+        const response = await axios.post<ImageApiResponse>(aiApiUrl(requestConfig, "/images/generations"), body, {
+            headers: aiHeaders(requestConfig, "application/json"),
+            signal: options?.signal,
+        });
         const images = await parseImagePayload(response.data);
         return images;
     } catch (error) {
@@ -814,7 +837,8 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
     formData.set("prompt", withSystemPrompt(requestConfig, requestPrompt));
     formData.set("n", String(n));
     // gpt-image models reject response_format; they always return b64.
-    if (!/gpt-image/.test(requestConfig.model)) {
+    // dola-seedream edits also rejects response_format and returns a url.
+    if (!/gpt-image/.test(requestConfig.model) && !/dola-seedream/.test(requestConfig.model)) {
         formData.set("response_format", "b64_json");
     }
     formData.set("output_format", IMAGE_OUTPUT_FORMAT);
@@ -832,12 +856,70 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
     if (mask) formData.set("mask", dataUrlToFile(mask));
 
     try {
+        if (requestConfig.apiFormat === "vpapi") return await requestVpapiImage(requestConfig, "/images/edits", formData, options);
         const response = await axios.post<ImageApiResponse>(aiApiUrl(requestConfig, "/images/edits"), formData, { headers: aiHeaders(requestConfig), signal: options?.signal });
         const images = await parseImagePayload(response.data);
         return images;
     } catch (error) {
         throw new Error(readAxiosError(error, apiText("requestFailed")));
     }
+}
+
+const IMAGE_TASK_POLL_INTERVAL = 2500;
+/** The gateway keeps running slow generations in the background; poll a little past its own 10 minute worker limit. */
+const IMAGE_TASK_POLL_ATTEMPTS = 288;
+
+/**
+ * vpapi answers image submits with a task id when asked to respond asynchronously,
+ * so slow models survive reverse-proxy timeouts. Gateways without that support
+ * ignore the header and the synchronous image list is used directly.
+ */
+async function requestVpapiImage(config: AiConfig, path: string, payload: Record<string, unknown> | FormData, options?: RequestOptions) {
+    const headers = { ...aiHeaders(config, payload instanceof FormData ? undefined : "application/json"), Prefer: "respond-async" };
+    const response = await axios.post<GatewayImageTask>(aiApiUrl(config, path), payload, { headers, signal: options?.signal });
+    const created = response.data;
+    if (!created?.id || created.data?.length) return parseImagePayload(created);
+    return pollVpapiImageTask(config, path, created.id, options);
+}
+
+async function pollVpapiImageTask(config: AiConfig, path: string, taskId: string, options?: RequestOptions) {
+    const url = `${aiApiUrl(config, path)}/${encodeURIComponent(taskId)}`;
+    for (let attempt = 0; attempt < IMAGE_TASK_POLL_ATTEMPTS; attempt += 1) {
+        if (options?.signal?.aborted) throw new DOMException("Aborted", "AbortError");
+        try {
+            const response = await axios.get<GatewayImageTask>(url, { headers: aiHeaders(config), signal: options?.signal });
+            if (response.data.status === "failed") throw new Error(readApiErrorMessage(response.data.error) || apiText("requestFailed"));
+            if (response.data.data?.length) return parseImagePayload(response.data);
+        } catch (error) {
+            if (!isImageTaskPending(error)) throw error;
+        }
+        await delay(IMAGE_TASK_POLL_INTERVAL, options?.signal);
+    }
+    throw new Error(apiText("imageTimeout"));
+}
+
+/** Task-backed image models answer 404 + image_not_ready until the provider finishes. */
+function isImageTaskPending(error: unknown) {
+    if (!axios.isAxiosError(error) || error.response?.status !== 404) return false;
+    return (error.response.data as { code?: string } | undefined)?.code === "image_not_ready";
+}
+
+function delay(ms: number, signal?: AbortSignal) {
+    return new Promise<void>((resolve, reject) => {
+        if (signal?.aborted) {
+            reject(new DOMException("Aborted", "AbortError"));
+            return;
+        }
+        const timer = setTimeout(resolve, ms);
+        signal?.addEventListener(
+            "abort",
+            () => {
+                clearTimeout(timer);
+                reject(new DOMException("Aborted", "AbortError"));
+            },
+            { once: true },
+        );
+    });
 }
 
 export async function requestImageQuestion(config: AiConfig, messages: AiTextMessage[], onDelta: (text: string) => void, options?: RequestOptions) {
@@ -878,32 +960,57 @@ export async function requestImageQuestion(config: AiConfig, messages: AiTextMes
     }
 }
 
-export async function fetchImageModels(config: Pick<AiConfig, "baseUrl" | "apiKey" | "apiFormat">) {
+export async function fetchChannelModels(channel: ModelChannel): Promise<ChannelModel[]> {
     try {
-        if (config.apiFormat === "gemini") {
-            const response = await axios.get<GeminiPayload>(geminiApiUrl({ ...defaultGeminiConfig, ...config }), { headers: geminiHeaders({ ...defaultGeminiConfig, ...config }) });
+        if (channel.apiFormat === "gemini") {
+            const config = { ...defaultGeminiConfig, ...channel };
+            const response = await axios.get<GeminiPayload>(geminiApiUrl(config), { headers: geminiHeaders(config) });
             validateGeminiPayload(response.data);
-            return (response.data.models || [])
+            const names = (response.data.models || [])
                 .map((model) => model.name?.replace(/^models\//, ""))
                 .filter((id): id is string => Boolean(id))
                 .sort((a, b) => a.localeCompare(b));
+            return normalizeChannelModels(names);
         }
-        const response = await axios.get<{ data?: Array<{ id?: string }>; error?: { message?: string } }>(buildApiUrl(config.baseUrl, "/models"), {
+        const response = await axios.get<{ data?: GatewayModelEntry[]; error?: { message?: string } }>(buildApiUrl(channel.baseUrl, "/models"), {
             headers: {
-                Authorization: `Bearer ${config.apiKey}`,
+                Authorization: `Bearer ${channel.apiKey}`,
             },
         });
-        return (response.data.data || [])
-            .map((model) => model.id)
-            .filter((id): id is string => Boolean(id))
-            .sort((a, b) => a.localeCompare(b));
+        const models = (response.data.data || [])
+            .filter((model): model is GatewayModelEntry & { id: string } => Boolean(model.id))
+            .map((model) => {
+                const capability = capabilityFromEndpointTypes(model.supported_endpoint_types) || guessCapability(model.id);
+                const video = capability === "video" ? readGatewayVideoSpec(model.video_capabilities) : undefined;
+                return { name: model.id, capability, ...(video ? { video } : {}) };
+            })
+            .sort((a, b) => a.name.localeCompare(b.name));
+        return normalizeChannelModels(models);
     } catch (error) {
         throw new Error(readAxiosError(error, apiText("modelReadFailed")));
     }
 }
 
-export async function fetchChannelModels(channel: ModelChannel) {
-    return fetchImageModels({ baseUrl: channel.baseUrl, apiKey: channel.apiKey, apiFormat: channel.apiFormat });
+/** vpapi publishes per-model video constraints inline; keep only what the canvas can honour. */
+function readGatewayVideoSpec(capabilities: GatewayModelEntry["video_capabilities"]): ChannelVideoSpec | undefined {
+    const profile = capabilities?.profiles?.[0];
+    if (!profile) return undefined;
+    const numbers = (value: unknown) => (Array.isArray(value) ? value.filter((item): item is number => typeof item === "number") : []);
+    const strings = (value: unknown) => (Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : []);
+    const count = (value: unknown) => (typeof value === "number" ? value : 0);
+    return {
+        durations: numbers(profile.durations),
+        resolutions: strings(profile.resolutions),
+        aspectRatios: strings(profile.aspect_ratios),
+        maxImages: count(profile.max_images),
+        maxVideos: count(profile.max_videos),
+        maxAudios: count(profile.max_audios),
+        ...(typeof profile.default_duration === "number" ? { defaultDuration: profile.default_duration } : {}),
+        ...(profile.supports_smart_duration ? { supportsSmartDuration: true } : {}),
+        ...(profile.supports_first_last_frames ? { supportsFirstLastFrames: true } : {}),
+        ...(profile.supports_generate_audio ? { supportsGenerateAudio: true } : {}),
+        ...(profile.supports_watermark ? { supportsWatermark: true } : {}),
+    };
 }
 
 const defaultGeminiConfig: Pick<AiConfig, "baseUrl" | "apiKey" | "apiFormat" | "model" | "systemPrompt"> = {

@@ -5,14 +5,30 @@ import { nanoid } from "nanoid";
 
 import i18n from "@/i18n";
 
-export type ApiCallFormat = "openai" | "gemini";
+export type ApiCallFormat = "openai" | "gemini" | "vpapi";
 export type ModelCapability = "image" | "video" | "text" | "audio";
 export type ReasoningEffort = "auto" | "low" | "medium" | "high" | "xhigh";
+
+/** Video constraints published by the vpapi gateway per model. */
+export type ChannelVideoSpec = {
+    durations: number[];
+    defaultDuration?: number;
+    resolutions: string[];
+    aspectRatios: string[];
+    maxImages: number;
+    maxVideos: number;
+    maxAudios: number;
+    supportsSmartDuration?: boolean;
+    supportsFirstLastFrames?: boolean;
+    supportsGenerateAudio?: boolean;
+    supportsWatermark?: boolean;
+};
 
 export type ChannelModel = {
     name: string;
     capability: ModelCapability;
     script?: string;
+    video?: ChannelVideoSpec;
 };
 
 export type ModelChannel = {
@@ -66,32 +82,30 @@ export const CONFIG_STORE_KEY = "infinite-canvas:ai_config_store";
 const CHANNEL_MODEL_SEPARATOR = "::";
 const OPENAI_BASE_URL = "https://api.openai.com";
 const GEMINI_BASE_URL = "https://generativelanguage.googleapis.com";
+/** Public gateway that speaks the vpapi protocol; users only need to paste their key. */
+export const VPAPI_BASE_URL = "https://api.zkki.net";
+export const VPAPI_CHANNEL_ID = "vpapi";
 
 export const defaultConfig: AiConfig = {
     channelMode: "local",
-    baseUrl: OPENAI_BASE_URL,
+    baseUrl: VPAPI_BASE_URL,
     apiKey: "",
-    apiFormat: "openai",
+    apiFormat: "vpapi",
     channels: [
         {
-            id: "default",
-            name: i18n.t("config.channels.defaultName"),
-            baseUrl: OPENAI_BASE_URL,
+            id: VPAPI_CHANNEL_ID,
+            name: "vpapi",
+            baseUrl: VPAPI_BASE_URL,
             apiKey: "",
-            apiFormat: "openai",
-            models: [
-                { name: "gpt-image-2", capability: "image" },
-                { name: "grok-imagine-video", capability: "video" },
-                { name: "gpt-5.5", capability: "text" },
-                { name: "gpt-4o-mini-tts", capability: "audio" },
-            ],
+            apiFormat: "vpapi",
+            models: [],
         },
     ],
-    model: "default::gpt-image-2",
-    imageModel: "default::gpt-image-2",
-    videoModel: "default::grok-imagine-video",
-    textModel: "default::gpt-5.5",
-    audioModel: "default::gpt-4o-mini-tts",
+    model: "",
+    imageModel: "",
+    videoModel: "",
+    textModel: "",
+    audioModel: "",
     audioVoice: "alloy",
     audioFormat: "mp3",
     audioSpeed: "1",
@@ -102,7 +116,7 @@ export const defaultConfig: AiConfig = {
     videoWatermark: "false",
     systemPrompt: "",
     reasoningEffort: "auto",
-    models: ["default::gpt-image-2", "default::grok-imagine-video", "default::gpt-5.5", "default::gpt-4o-mini-tts"],
+    models: [],
     quality: "auto",
     size: "1:1",
     background: "",
@@ -132,13 +146,13 @@ type ConfigStore = {
     clearPromptContinue: () => void;
 };
 
-const VIDEO_KEYWORDS = ["video", "sora", "veo", "kling", "wan", "hailuo"];
+const VIDEO_KEYWORDS = ["video", "sora", "veo", "kling", "wan", "hailuo", "seedance", "minimax", "pixverse", "runway", "luma", "mochi", "cogvideo", "hunyuan-video", "sd-2", "sd_2", "sd2", "videos_"];
+const IMAGE_KEYWORDS = ["seedream", "gpt-image", "image", "dall-e", "dalle", "imagen", "flux", "sdxl", "stable-diffusion", "midjourney", "picasso", "aura", "recraft", "nova", "hidream"];
 
 export function boolConfig(value: string, fallback: boolean) {
     return value ? value === "true" : fallback;
 }
 const AUDIO_KEYWORDS = ["audio", "tts", "speech", "voice", "music", "sound"];
-const IMAGE_KEYWORDS = ["seedream", "gpt-image", "image", "dall-e", "dalle", "imagen", "flux", "sdxl", "stable-diffusion", "midjourney"];
 
 /** Best-effort default capability for a freshly fetched model name; user can override in the channel editor. */
 export function guessCapability(name: string): ModelCapability {
@@ -147,6 +161,15 @@ export function guessCapability(name: string): ModelCapability {
     if (AUDIO_KEYWORDS.some((keyword) => value.includes(keyword))) return "audio";
     if (IMAGE_KEYWORDS.some((keyword) => value.includes(keyword))) return "image";
     return "text";
+}
+
+/** Capability from the endpoint types the gateway advertises for a model; undefined when the gateway does not publish them. */
+export function capabilityFromEndpointTypes(types: string[] | undefined): ModelCapability | undefined {
+    if (!types?.length) return undefined;
+    if (types.includes("openai-video")) return "video";
+    if (types.includes("image-generation")) return "image";
+    if (types.some((type) => type === "openai" || type === "openai-response" || type === "anthropic" || type === "gemini")) return "text";
+    return undefined;
 }
 
 function findChannelModel(config: AiConfig, value: string): { channel: ModelChannel; model: ChannelModel } | null {
@@ -184,6 +207,31 @@ export function resolveModelScript(config: AiConfig, value: string) {
     return findChannelModel(config, value)?.model.script?.trim() || "";
 }
 
+/** Video constraints the gateway published for a model; undefined when the channel has none. */
+export function resolveModelVideoSpec(config: AiConfig, value: string) {
+    return findChannelModel(config, value)?.model.video;
+}
+
+/** Compare resolutions across the gateway's labels ("4k", "2K", "768P") and the legacy numeric scale ("2160"). */
+function resolutionKey(value: string) {
+    return value.trim().toLowerCase().replace(/p$/, "");
+}
+
+/** Snap a duration onto the durations the gateway accepts; undefined when the model publishes none. */
+export function videoSpecSeconds(spec: ChannelVideoSpec | undefined, value: string) {
+    if (!spec?.durations.length) return undefined;
+    const durations = [...spec.durations].sort((a, b) => a - b);
+    const requested = Math.floor(Number(value) || durations[0]);
+    return String(durations.reduce((best, item) => (Math.abs(item - requested) < Math.abs(best - requested) ? item : best)));
+}
+
+/** Snap a resolution onto the labels the gateway accepts; undefined when the model publishes none. */
+export function videoSpecResolution(spec: ChannelVideoSpec | undefined, value: string) {
+    if (!spec?.resolutions.length) return undefined;
+    const requested = resolutionKey(value);
+    return spec.resolutions.find((item) => resolutionKey(item) === requested) || spec.resolutions[0];
+}
+
 function isAiConfigReady(config: AiConfig, model: string) {
     const channel = resolveModelChannel(config, model);
     return Boolean(model.trim() && channel.baseUrl.trim() && channel.apiKey.trim());
@@ -218,7 +266,14 @@ export const useConfigStore = create<ConfigStore>()(
         }),
         {
             name: CONFIG_STORE_KEY,
+            version: 5,
             partialize: (state) => ({ config: state.config, webdav: state.webdav }),
+            migrate: (persistedState, version) => {
+                const persisted = (persistedState || {}) as Partial<ConfigStore>;
+                // v5 起默认渠道改为 vpapi 协议；更早的版本内置了固定的第三方渠道与密钥，一律重置。
+                if (version >= 5) return persisted as { config: AiConfig; webdav: WebdavSyncConfig };
+                return { config: { ...defaultConfig }, webdav: persisted.webdav || defaultWebdavSyncConfig };
+            },
             merge: (persisted, current) => {
                 const persistedState = (persisted || {}) as Partial<ConfigStore>;
                 const persistedConfig = (persistedState.config || {}) as Partial<AiConfig>;
@@ -272,7 +327,7 @@ export function normalizeChannelModels(models: Array<string | ChannelModel> | un
         seen.add(name);
         const capability = typeof item === "string" ? guessCapability(name) : item.capability || guessCapability(name);
         const script = typeof item === "string" ? undefined : item.script?.trim() || undefined;
-        result.push({ name, capability, script });
+        result.push({ name, capability, script, ...(typeof item === "string" || !item.video ? {} : { video: item.video }) });
     }
     return result;
 }
@@ -375,11 +430,38 @@ function normalizeChannels(config: AiConfig) {
 
 export function defaultBaseUrlForApiFormat(apiFormat: ApiCallFormat) {
     if (apiFormat === "gemini") return GEMINI_BASE_URL;
+    if (apiFormat === "vpapi") return VPAPI_BASE_URL;
     return OPENAI_BASE_URL;
 }
 
+/** Replace the channel list and re-derive the model options plus one default model per capability. */
+export function applyChannels(config: AiConfig, channels: ModelChannel[]): AiConfig {
+    const next: AiConfig = {
+        ...config,
+        channels,
+        models: modelOptionsFromChannels(channels),
+        baseUrl: channels[0]?.baseUrl || config.baseUrl,
+        apiKey: channels[0]?.apiKey || config.apiKey,
+        apiFormat: channels[0]?.apiFormat || config.apiFormat,
+    };
+    return {
+        ...next,
+        imageModel: pickDefaultModel(next, "image", config.imageModel),
+        videoModel: pickDefaultModel(next, "video", config.videoModel),
+        textModel: pickDefaultModel(next, "text", config.textModel),
+        audioModel: pickDefaultModel(next, "audio", config.audioModel),
+    };
+}
+
+function pickDefaultModel(config: AiConfig, capability: ModelCapability, current: string) {
+    const options = selectableModelsByCapability(config, capability);
+    const normalized = normalizeModelOptionValue(current, config.channels);
+    return options.includes(normalized) ? normalized : options[0] || "";
+}
+
 function normalizeApiFormat(apiFormat: unknown): ApiCallFormat {
-    return apiFormat === "gemini" ? apiFormat : "openai";
+    if (apiFormat === "gemini" || apiFormat === "vpapi") return apiFormat;
+    return "openai";
 }
 
 function uniqueModelOptions(models: string[]) {

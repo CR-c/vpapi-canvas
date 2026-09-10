@@ -5,11 +5,24 @@ description: Run Infinite Canvas in a few steps
 
 # Quick Start
 
-To try the project, deploy or start the `web/` frontend.
+## Deploy (static frontend, no backend)
 
-## Deploy with Vercel
+Infinite Canvas is a static frontend. Model requests go from the browser straight to each gateway, so no database or application server is needed. Fastest path — one Docker command:
 
-Import the repository into Vercel. The root `vercel.json` builds `web/`. AI requests are sent directly from the browser to your OpenAI-compatible endpoint, so no additional application server is required.
+```bash
+docker run -d --name infinite-canvas -p 3000:3000 --restart unless-stopped \
+  ghcr.io/basketikun/infinite-canvas:latest
+```
+
+Open `http://your-server:3000`. Other options (Render, Vercel, deploying with an AI like Codex/Claude Code/Cursor) are in `DEPLOY.md` at the repo root.
+
+## One key is all you need
+
+1. Open **Settings** in the top-right corner.
+2. Paste your API key in the "Connect vpapi in one step" box and click **Connect and load models**.
+3. The canvas imports every image / video / text model available to that key and sets sensible defaults automatically.
+
+You can then immediately generate and edit images, create text- or image-to-video, and chat with an assistant.
 
 ## Run locally
 
@@ -22,17 +35,8 @@ bun run dev
 
 Open `http://localhost:3000`.
 
-## Run with Docker
+## Bring your own gateway
 
-```bash
-docker build -t infinite-canvas .
-docker run --rm -p 3000:3000 infinite-canvas
-```
+Add any channel in Settings and pick an OpenAI- or Gemini-compatible protocol. Models are imported automatically and categorized by the gateway's capability labels; vpapi is just the preconfigured channel.
 
-## First-time setup
-
-- Open Settings and enter your `Base URL`, `API Key`, and model names.
-- Open `/prompts` to fetch prompt repositories directly from the browser and cache them in IndexedDB.
-- Configure WebDAV if you want to synchronize canvases, assets, and generation history across devices.
-
-Canvas projects and My Assets are primarily stored in the browser. The API key is also stored locally and used by the browser to call OpenAI-compatible endpoints directly.
+Canvas projects and My Assets are primarily stored in the browser. The API key is also stored locally and used by the browser to call the gateway directly — it is never uploaded to the canvas server.

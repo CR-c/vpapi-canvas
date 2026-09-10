@@ -4,14 +4,14 @@ import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { fetchChannelModels } from "@/services/api/image";
-import type { ModelChannel } from "@/stores/use-config-store";
+import { guessCapability, type ChannelModel, type ModelChannel } from "@/stores/use-config-store";
 
 // Channel model selector: fetch upstream models or add them manually, then include checked models in the channel list.
-export function ModelSelectModal({ open, channel, selectedNames, onConfirm, onClose }: { open: boolean; channel: ModelChannel | null; selectedNames: string[]; onConfirm: (names: string[]) => void; onClose: () => void }) {
+export function ModelSelectModal({ open, channel, existingModels, onConfirm, onClose }: { open: boolean; channel: ModelChannel | null; existingModels: ChannelModel[]; onConfirm: (models: ChannelModel[]) => void; onClose: () => void }) {
     const { message } = App.useApp();
     const { t } = useTranslation();
-    const [existing, setExisting] = useState<string[]>([]);
-    const [fetched, setFetched] = useState<string[]>([]);
+    const [existing, setExisting] = useState<ChannelModel[]>([]);
+    const [fetched, setFetched] = useState<ChannelModel[]>([]);
     const [selected, setSelected] = useState<Set<string>>(new Set());
     const [activeTab, setActiveTab] = useState("new");
     const [search, setSearch] = useState("");
@@ -20,15 +20,15 @@ export function ModelSelectModal({ open, channel, selectedNames, onConfirm, onCl
 
     useEffect(() => {
         if (!open) return;
-        setExisting(selectedNames);
+        setExisting(existingModels);
         setFetched([]);
-        setSelected(new Set(selectedNames));
-        setActiveTab(selectedNames.length ? "existing" : "new");
+        setSelected(new Set(existingModels.map((model) => model.name)));
+        setActiveTab(existingModels.length ? "existing" : "new");
         setSearch("");
         setManual("");
-    }, [open, selectedNames]);
+    }, [open, existingModels]);
 
-    const currentList = activeTab === "new" ? fetched : existing;
+    const currentList = activeTab === "new" ? fetched.map((model) => model.name) : existing.map((model) => model.name);
     const visibleList = useMemo(() => {
         const keyword = search.trim().toLowerCase();
         return keyword ? currentList.filter((name) => name.toLowerCase().includes(keyword)) : currentList;
@@ -53,7 +53,7 @@ export function ModelSelectModal({ open, channel, selectedNames, onConfirm, onCl
     const addManual = () => {
         const name = manual.trim();
         if (!name) return;
-        if (!fetched.includes(name) && !existing.includes(name)) setFetched((current) => [name, ...current]);
+        if (!fetched.some((model) => model.name === name) && !existing.some((model) => model.name === name)) setFetched((current) => [{ name, capability: guessCapability(name) }, ...current]);
         setSelected((current) => new Set(current).add(name));
         setManual("");
         setActiveTab("new");
@@ -79,7 +79,8 @@ export function ModelSelectModal({ open, channel, selectedNames, onConfirm, onCl
     };
 
     const confirm = () => {
-        const ordered = [...existing, ...fetched].filter((name, index, list) => list.indexOf(name) === index).filter((name) => selected.has(name));
+        // Fetched entries come first so the capability the gateway published wins over a previous guess.
+        const ordered = [...fetched, ...existing].filter((model, index, list) => list.findIndex((item) => item.name === model.name) === index).filter((model) => selected.has(model.name));
         onConfirm(ordered);
         onClose();
     };
