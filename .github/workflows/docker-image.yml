@@ -10,7 +10,7 @@ permissions:
   packages: write
 
 env:
-  IMAGE_NAME: ghcr.io/CR-c/vpapi-canvas
+  IMAGE_NAME: ghcr.io/cr-c/vpapi-canvas
 
 jobs:
   meta:

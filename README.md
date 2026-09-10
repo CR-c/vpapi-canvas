@@ -32,7 +32,7 @@
 
 ```bash
 # 纯静态、无数据库、无后端。一条命令即可启动：
-docker run -d --name infinite-canvas -p 3000:3000 --restart unless-stopped ghcr.io/CR-c/vpapi-canvas:latest
+docker run -d --name infinite-canvas -p 3000:3000 --restart unless-stopped ghcr.io/cr-c/vpapi-canvas:latest
 ```
 
 > [!CAUTION]
