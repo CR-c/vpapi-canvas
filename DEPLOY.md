@@ -7,7 +7,7 @@
 
 ```bash
 docker run -d --name infinite-canvas -p 3000:3000 --restart unless-stopped \
-  ghcr.io/basketikun/infinite-canvas:latest
+  ghcr.io/CR-c/vpapi-canvas:latest
 ```
 
 打开 `http://服务器IP:3000` 即可。
@@ -16,7 +16,7 @@ docker run -d --name infinite-canvas -p 3000:3000 --restart unless-stopped \
 
 ```text
 请帮我在当前机器上部署 infinite-canvas：
-1. 用 Docker 运行 ghcr.io/basketikun/infinite-canvas:latest，映射端口 3000，容器名 infinite-canvas，重启策略 unless-stopped。
+1. 用 Docker 运行 ghcr.io/CR-c/vpapi-canvas:latest，映射端口 3000，容器名 infinite-canvas，重启策略 unless-stopped。
 2. 如果机器上已有 nginx/Caddy，帮我把域名反代到 127.0.0.1:3000 并配置 HTTPS。
 3. 部署完成后执行 curl -I http://127.0.0.1:3000 确认返回 200，并告诉我访问地址。
 ```
@@ -26,6 +26,7 @@ AI 需要知道的边界：
 - 只需要 80/443/3000 端口，不需要数据库、Redis、对象存储。
 - 静态站点没有服务端环境变量，**不要**把 API Key 写进任何配置文件。
 - 如果服务器在墙内需要加速镜像拉取，可改用自己构建：`docker build -t infinite-canvas . && docker run -d -p 3000:3000 infinite-canvas`。
+- 本仓库基于 [basketikun/infinite-canvas](https://github.com/basketikun/infinite-canvas)（MIT）；这里发布的镜像 `ghcr.io/CR-c/vpapi-canvas` 内置了 vpapi 协议与一键接入。
 
 ## 云平台部署
 
