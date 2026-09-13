@@ -8,6 +8,8 @@ import { AppConfigModal } from "@/components/layout/app-config-modal";
 import { MobileNavDrawer } from "@/components/layout/mobile-nav-drawer";
 import { UserStatusActions } from "@/components/layout/user-status-actions";
 import { cn } from "@/lib/utils";
+// [vpapi-canvas] fork：顶栏加入当前 Key 的额度显示。
+import { QuotaChip } from "@/product/ui/quota-chip";
 import { useEffect, useRef, useState } from "react";
 import { useAgentStore } from "@/stores/use-agent-store";
 
@@ -83,6 +85,8 @@ export function AppTopNav() {
                         </div>
 
                         <div className="my-auto flex h-9 min-w-0 items-center justify-end gap-2 justify-self-end whitespace-nowrap">
+                            {/* [vpapi-canvas] fork：当前 Key 的剩余额度 */}
+                            <QuotaChip />
                             <Tooltip title={t(panelOpen ? "topNav.closeAgent" : "topNav.openAgent")}>
                                 <Button type="text" shape="circle" className="!h-8 !w-8 !min-w-8" icon={<Bot className="size-4" />} onClick={togglePanel} aria-label={t(panelOpen ? "topNav.closeAgent" : "topNav.openAgent")} />
                             </Tooltip>

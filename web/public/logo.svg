@@ -1,4 +1,5 @@
 <svg width="64" height="64" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
-  <path d="M32 8L58 54H46L32 29L18 54H6L32 8Z" fill="currentColor"/>
-  <path d="M32 40L40 54H24L32 40Z" fill="currentColor"/>
+  <path d="M8 12H56V52H8V12ZM14 18V46H50V18H14Z" fill="currentColor"/>
+  <path d="M27 23.5L42 32L27 40.5V23.5Z" fill="currentColor"/>
+  <circle cx="19" cy="23" r="2.4" fill="currentColor"/>
 </svg>

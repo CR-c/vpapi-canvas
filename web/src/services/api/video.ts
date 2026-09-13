@@ -9,11 +9,20 @@ import { runModelPlugin } from "./model-plugin";
 import type { ReferenceImage } from "@/types/image";
 import type { ReferenceAudio, ReferenceVideo } from "@/types/media";
 
-type VideoResponse = { id: string; status?: string; error?: { message?: string }; url?: string; result_url?: string; video_url?: string; content?: { video_url?: string; url?: string } | null };
+type VideoResponse = { id: string; status?: string; error?: { message?: string }; url?: string; result_url?: string; video_url?: string; metadata?: { url?: string; video_url?: string; result_url?: string } | null; content?: { video_url?: string; url?: string } | null };
 type ApiVideoResponse = VideoResponse | { code?: number | string; data?: VideoResponse | null; msg?: string; message?: string; error?: { message?: string } };
 type ApiEnvelope<T> = T | { code?: number | string; data?: T | null; msg?: string; message?: string; error?: { message?: string } };
 type RequestOptions = { signal?: AbortSignal };
 const apiText = (key: string, options?: Record<string, unknown>) => i18n.t(`apiErrors.${key}`, options);
+
+export const VIDEO_TASK_POLL_INTERVAL = 2500;
+// Some providers (e.g. seedance) take 10+ minutes to render; keep polling for
+// up to 30 minutes so a task is not reported as failed while it is still running.
+export const VIDEO_TASK_TIMEOUT_MS = 30 * 60 * 1000;
+// A poll that fails for a moment (network flap, gateway restart, rate limit) must
+// not fail a generation the provider is still rendering, so keep retrying for about
+// a minute before reporting the error.
+const VIDEO_TASK_QUERY_RETRY_DELAYS = [2000, 4000, 8000, 16000, 30000];
 
 export type VideoGenerationResult = { blob?: Blob; url?: string; mimeType?: string };
 export type VideoGenerationTask = { id: string; provider: "openai" | "plugin"; model: string };
@@ -37,16 +46,13 @@ type VideoMediaOptions = RequestOptions & { videos?: ReferenceVideo[]; audios?: 
 
 export async function requestVideoGeneration(config: AiConfig, prompt: string, references: ReferenceImage[] = [], options?: VideoMediaOptions): Promise<VideoGenerationResult> {
     const task = await createVideoGenerationTask(config, prompt, references, options);
-    // Some providers (e.g. seedance) take 10+ minutes to render; keep polling
-    // for up to 30 minutes so the canvas does not time out while the task is
-    // still generating.
-    for (let attempt = 0; attempt < 720; attempt += 1) {
+    const deadline = Date.now() + VIDEO_TASK_TIMEOUT_MS;
+    while (Date.now() < deadline) {
         if (options?.signal?.aborted) throw new DOMException("Aborted", "AbortError");
         const state = await pollVideoGenerationTask(config, task, options);
         if (state.status === "completed") return state.result;
         if (state.status === "failed") throw new Error(state.error);
-        if (attempt === 719) throw new Error(apiText("videoTimeout", { provider: "" }));
-        await delay(2500, options?.signal);
+        await delay(VIDEO_TASK_POLL_INTERVAL, options?.signal);
     }
     throw new Error(apiText("videoTimeout", { provider: "" }));
 }
@@ -155,31 +161,59 @@ async function createOpenAIVideoTask(config: AiConfig, model: string, prompt: st
 }
 
 async function pollOpenAIVideoTask(config: AiConfig, task: VideoGenerationTask, options?: RequestOptions): Promise<VideoGenerationTaskState> {
-    try {
-        const video = unwrapVideoResponse((await axios.get<ApiVideoResponse>(aiApiUrl(config, `/videos/${task.id}`), { headers: aiHeaders(config), signal: options?.signal })).data);
-        const url = videoResultUrl(video);
-        if (url) return { status: "completed", result: await videoResultFromUrl(url, options) };
-        if (video.status === "completed") {
-            const content = await axios.get<Blob>(aiApiUrl(config, `/videos/${task.id}/content`), { headers: aiHeaders(config), responseType: "blob", signal: options?.signal });
-            await assertVideoBlob(content.data);
-            return { status: "completed", result: { blob: content.data } };
+    for (let retry = 0; ; retry += 1) {
+        try {
+            return await readOpenAIVideoTask(config, task, options);
+        } catch (error) {
+            if (retry < VIDEO_TASK_QUERY_RETRY_DELAYS.length && isTransientVideoQueryError(error)) {
+                await delay(VIDEO_TASK_QUERY_RETRY_DELAYS[retry], options?.signal);
+                continue;
+            }
+            throw new Error(readAxiosError(error, apiText("videoTaskQueryFailed")));
         }
-        if (video.status === "failed" || video.status === "cancelled") return { status: "failed", error: readApiErrorMessage(video.error?.message) || apiText("videoGenerationFailed") };
-        return { status: "pending" };
-    } catch (error) {
-        throw new Error(readAxiosError(error, apiText("videoTaskQueryFailed")));
     }
 }
 
-async function videoResultFromUrl(url: string, options?: RequestOptions): Promise<VideoGenerationResult> {
+async function readOpenAIVideoTask(config: AiConfig, task: VideoGenerationTask, options?: RequestOptions): Promise<VideoGenerationTaskState> {
+    const video = unwrapVideoResponse((await axios.get<ApiVideoResponse>(aiApiUrl(config, `/videos/${task.id}`), { headers: aiHeaders(config), signal: options?.signal })).data);
+    const url = videoResultUrl(video);
+    if (url) return { status: "completed", result: await videoResultFromUrl(config, task, url, options) };
+    if (video.status === "completed") return { status: "completed", result: { blob: await fetchVideoContent(config, task, options) } };
+    if (video.status === "failed" || video.status === "cancelled") return { status: "failed", error: readApiErrorMessage(video.error?.message) || apiText("videoGenerationFailed") };
+    return { status: "pending" };
+}
+
+async function fetchVideoContent(config: AiConfig, task: VideoGenerationTask, options?: RequestOptions) {
+    const content = await axios.get<Blob>(aiApiUrl(config, `/videos/${task.id}/content`), { headers: aiHeaders(config), responseType: "blob", signal: options?.signal });
+    await assertVideoBlob(content.data);
+    return content.data;
+}
+
+/** Gateways that publish the result as a share URL (e.g. vpapi) may hand out a URL the browser cannot read itself, so fall back to the authenticated content endpoint. */
+async function videoResultFromUrl(config: AiConfig, task: VideoGenerationTask, url: string, options?: RequestOptions): Promise<VideoGenerationResult> {
     try {
         const response = await axios.get<Blob>(url, { responseType: "blob", signal: options?.signal });
         await assertVideoBlob(response.data);
         return { blob: response.data };
     } catch (error) {
         if (axios.isCancel(error) || options?.signal?.aborted) throw error;
-        return { url, mimeType: "video/mp4" };
+        try {
+            return { blob: await fetchVideoContent(config, task, options) };
+        } catch (fallbackError) {
+            if (axios.isCancel(fallbackError) || options?.signal?.aborted) throw fallbackError;
+            return { url, mimeType: "video/mp4" };
+        }
     }
+}
+
+/** Network flaps, gateway hiccups and rate limits only mean "ask again"; auth and aborted requests must surface immediately. */
+function isTransientVideoQueryError(error: unknown) {
+    if (axios.isCancel(error)) return false;
+    if (error instanceof DOMException && error.name === "AbortError") return false;
+    if (!axios.isAxiosError(error)) return false;
+    const status = error.response?.status;
+    if (!status) return error.code === "ERR_NETWORK" || error.code === "ECONNABORTED" || error.code === "ETIMEDOUT";
+    return status === 408 || status === 425 || status === 429 || status >= 500;
 }
 
 function assertVideoConfig(config: AiConfig, model: string) {
@@ -252,7 +286,7 @@ function unwrapVideoResponse(payload: ApiVideoResponse) {
 function unwrapEnvelope<T>(payload: ApiEnvelope<T>, emptyMessage: string): T {
     if (!payload) throw new Error(emptyMessage);
     if (typeof payload === "object" && "code" in payload && payload.code !== undefined) {
-        if (payload.code !== 0 && payload.code !== "0") throw new Error(readApiErrorMessage(payload) || apiText("requestFailed"));
+        if (payload.code !== 0 && payload.code !== "0" && payload.code !== "success") throw new Error(readApiErrorMessage(payload) || apiText("requestFailed"));
         if (!payload.data) throw new Error(emptyMessage);
         return payload.data;
     }
@@ -260,7 +294,8 @@ function unwrapEnvelope<T>(payload: ApiEnvelope<T>, emptyMessage: string): T {
 }
 
 function videoResultUrl(payload: VideoResponse) {
-    return [payload.video_url, payload.result_url, payload.url, payload.content?.video_url, payload.content?.url].find((url) => typeof url === "string" && (isPublicMediaUrl(url) || /\.mp4(\?|#|$)/i.test(url)));
+    const candidates = [payload.video_url, payload.result_url, payload.url, payload.metadata?.video_url, payload.metadata?.result_url, payload.metadata?.url, payload.content?.video_url, payload.content?.url];
+    return candidates.find((url) => typeof url === "string" && (isPublicMediaUrl(url) || /\.mp4(\?|#|$)/i.test(url))) || "";
 }
 
 function readApiErrorMessage(value: unknown): string {
@@ -310,6 +345,7 @@ function statusMessage(status: number | undefined, fallback: string) {
 }
 
 async function assertVideoBlob(blob: Blob) {
+    if (blob.type.includes("html")) throw new Error(apiText("videoDownloadFailed"));
     if (!blob.type.includes("json")) return;
     let payload: { code?: number; msg?: string; error?: { message?: string } };
     try {

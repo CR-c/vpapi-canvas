@@ -4,6 +4,10 @@ import { useTranslation } from "react-i18next";
 
 import { LocalAgentPanel } from "./local-agent-panel";
 import { canvasThemes } from "@/lib/canvas-theme";
+// [vpapi-canvas] fork：默认使用内置 Agent（vpapi 模型 + 浏览器内画布工具），可切回本地 CLI Agent。
+import { PRODUCT_FLAGS } from "@/product/flags";
+import { useProductStore } from "@/product/store";
+import { ProductAgentPanel } from "@/product/ui/product-agent-panel";
 import { CANVAS_AGENT_PANEL_MOTION_MS, useAgentStore } from "@/stores/use-agent-store";
 import { useThemeStore } from "@/stores/use-theme-store";
 
@@ -18,6 +22,9 @@ export function AgentPanel() {
     const panelOpen = useAgentStore((state) => state.panelOpen);
     const panelClosing = useAgentStore((state) => state.panelClosing);
     const setAgentState = useAgentStore((state) => state.setAgentState);
+    // [vpapi-canvas] fork：内置 Agent 为默认，本地 CLI Agent 保留为可选。
+    const localAgentPreferred = useProductStore((state) => state.useLocalAgent);
+    const useBuiltinAgent = PRODUCT_FLAGS.builtinAgent && !localAgentPreferred;
     const startResize = (event: ReactPointerEvent<HTMLButtonElement>) => {
         event.preventDefault();
         const startX = event.clientX;
@@ -57,7 +64,8 @@ export function AgentPanel() {
                 style={{ width, background: theme.node.panel, borderColor: theme.node.stroke, color: theme.node.text }}
             >
                 <button type="button" className="absolute inset-y-0 left-0 z-40 w-4 -translate-x-1/2 cursor-col-resize" onPointerDown={startResize} aria-label={t("agent.panel.resize")} />
-                <LocalAgentPanel embedded />
+                {/* [vpapi-canvas] fork：内置 Agent / 本地 CLI Agent */}
+                {useBuiltinAgent ? <ProductAgentPanel /> : <LocalAgentPanel embedded />}
             </motion.aside>
         </motion.div>
     );

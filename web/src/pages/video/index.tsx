@@ -14,7 +14,7 @@ import { canvasThemes } from "@/lib/canvas-theme";
 import { formatBytes, formatDuration } from "@/lib/image-utils";
 import { deleteStoredMedia, resolveMediaUrl } from "@/services/file-storage";
 import { resolveImageUrl, uploadImage } from "@/services/image-storage";
-import { createVideoGenerationTask, pollVideoGenerationTask, storeGeneratedVideo, type VideoGenerationTask } from "@/services/api/video";
+import { VIDEO_TASK_POLL_INTERVAL, VIDEO_TASK_TIMEOUT_MS, createVideoGenerationTask, pollVideoGenerationTask, storeGeneratedVideo, type VideoGenerationTask } from "@/services/api/video";
 import { useAssetStore } from "@/stores/use-asset-store";
 import { useWorkbenchAgentStore } from "@/stores/use-workbench-agent-store";
 import { boolConfig, modelOptionLabel, useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
@@ -313,7 +313,8 @@ export default function VideoPage() {
         setResults((value) => (value.length ? value : [{ id: log.id, status: "pending" }]));
         const taskConfig = buildVideoConfig({ ...effectiveConfig, ...log.config }, log.task.model || log.model);
         try {
-            for (let attempt = 0; attempt < 120; attempt += 1) {
+            const deadline = Date.now() + VIDEO_TASK_TIMEOUT_MS;
+            while (Date.now() < deadline) {
                 const state = await pollVideoGenerationTask(configOverride || taskConfig, log.task);
                 if (state.status === "completed") {
                     const stored = await storeGeneratedVideo(state.result);
@@ -334,9 +335,9 @@ export default function VideoPage() {
                     return;
                 }
                 if (state.status === "failed") throw new Error(state.error);
-                if (attempt === 119) throw new Error(t("videoWorkbench.timeout"));
-                await delay(2500);
+                await delay(VIDEO_TASK_POLL_INTERVAL);
             }
+            throw new Error(t("videoWorkbench.timeout"));
         } catch (error) {
             const errorMessage = error instanceof Error ? error.message : t("workbench.generationFailed");
             setResults([{ id: log.id, status: "failed", error: errorMessage }]);

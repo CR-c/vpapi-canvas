@@ -3,9 +3,11 @@ import { App } from "antd";
 import { useTranslation } from "react-i18next";
 import { APP_VERSION } from "@/constant/env";
 import { parseChangelog, type ReleaseInfo } from "@/lib/release";
+// [vpapi-canvas] fork：版本检查跟随本 fork 仓库。
+import { LINKS } from "@/product/brand";
 
-const latestVersionUrl = "https://raw.githubusercontent.com/basketikun/infinite-canvas/main/VERSION";
-const latestChangelogUrl = "https://raw.githubusercontent.com/basketikun/infinite-canvas/main/CHANGELOG.md";
+const latestVersionUrl = `${LINKS.repoRaw}/VERSION`;
+const latestChangelogUrl = `${LINKS.repoRaw}/CHANGELOG.md`;
 
 function readLocalReleases(): ReleaseInfo[] {
     return __APP_RELEASES__ || [];

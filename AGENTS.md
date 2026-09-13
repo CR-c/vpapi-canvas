@@ -13,6 +13,15 @@
 - 不要改无关文件，不要顺手重构。
 - 如果工作区已有用户改动，不要回滚，不要覆盖；只在必要范围内追加修改。
 
+## fork 与上游同步
+
+- 本仓库是 `basketikun/infinite-canvas` 的 fork（vpapi 专用画布），必须保持随时能合上游更新：`origin` 是上游、`vpapi` 是发布仓库，完整说明见 `FORK.md`。
+- 新功能一律写在 `web/src/product/**` 下，不要改上游业务文件。
+- 必须改上游文件时，只能动 `FORK.md`「补丁点清单」里的文件，并用 `// [vpapi-canvas]` 注释包住改动；需要新的补丁点先登记到清单里再改。
+- 不物理删除上游能力（Gemini 协议、协议切换、模型脚本、渠道管理等），只通过产品开关或面板替换让入口不可达。
+- 品牌与产品文案用 `web/src/product/i18n-overrides.ts` 运行时覆盖，不改上游 `web/src/i18n/locales/*.ts`。
+- 同步上游用 `./scripts/sync-upstream.sh`（或等 `upstream-sync` Action 开 PR），只用 `git merge`，不要 rebase；解决冲突后必须执行 `cd web && npm run typecheck && npm run build` 再推送。
+
 ## 反复提醒沉淀
 
 - 如果开发过程中总是遇到某个问题，或者用户反复提醒同一个注意事项，需要把该注意事项补充到本文件。

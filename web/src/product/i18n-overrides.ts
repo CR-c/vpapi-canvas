@@ -1,0 +1,182 @@
+import i18n from "@/i18n";
+
+import { BRAND } from "./brand";
+
+/**
+ * 品牌与产品文案覆盖。
+ *
+ * fork 不修改上游的 `i18n/locales/*.ts`（否则每次同步上游都要解冲突），
+ * 改为在运行时用 addResourceBundle 覆盖少量 key；产品自己的界面文案也放这里，
+ * 统一用 `product.` 前缀。
+ */
+const overrides: Record<string, Record<string, string>> = {
+    "zh-CN": {
+        "product.connect.title": "接入 vpapi",
+        "product.connect.subtitle": "粘贴你的 vpapi API Key，即可开始生图、生视频和用内置助手创作。",
+        "product.connect.keyLabel": "API Key",
+        "product.connect.keyPlaceholder": "sk-...",
+        "product.connect.connect": "接入",
+        "product.connect.connecting": "正在读取模型…",
+        "product.connect.connected": "接入成功，已导入 {{count}} 个模型",
+        "product.connect.hint": "还没有 Key？到 vpapi 的「密钥」页面创建一个，额度与用量都在那边管理。",
+        "product.connect.getKey": "获取 API Key",
+        "product.connect.recharge": "充值",
+        "product.connect.doc": "查看使用文档",
+        "product.connect.gateway": "网关地址",
+        "product.connect.skip": "稍后再说",
+        "product.connect.missingKey": "请输入 API Key",
+        "product.connect.empty": "这把 Key 下没有可用模型，请检查密钥分组或额度",
+        "product.connect.invalidKey": "API Key 无效或已被禁用，请到 vpapi 重新复制",
+        "product.connect.groupRequired": "这把 Key 还没有设置分组，请到 vpapi 的密钥页面设置分组后再试",
+        "product.connect.quotaExhausted": "这把 Key 的额度不足，充值后再试",
+        "product.connect.unreachable": "连接不上 vpapi（{{url}}），请检查网络或稍后重试",
+        "product.connect.failed": "接入失败：{{error}}",
+        "product.connect.freshStart": "接入后本地已有模型会按这把 Key 重新读取。",
+        "product.channels.title": "vpapi 接入",
+        "product.channels.connected": "已接入",
+        "product.channels.disconnected": "未接入",
+        "product.channels.key": "API Key",
+        "product.channels.gateway": "网关",
+        "product.channels.models": "模型",
+        "product.channels.modelSummary": "图片 {{image}} · 视频 {{video}} · 文本 {{text}} · 音频 {{audio}}",
+        "product.channels.defaults": "默认模型",
+        "product.channels.reconnect": "重新读取模型",
+        "product.channels.changeKey": "更换 Key",
+        "product.channels.disconnect": "断开接入",
+        "product.channels.disconnectConfirm": "断开后会清空本地保存的 Key 与模型列表，确定继续？",
+        "product.channels.disconnectedDone": "已断开接入",
+        "product.channels.reconnectDone": "模型已更新，共 {{count}} 个",
+        "product.channels.keyPlaceholder": "sk-...",
+        "product.channels.save": "保存并读取模型",
+        "product.channels.lockedHint": "画布只对接 vpapi，网关地址与协议已锁定。",
+        "product.quota.title": "剩余额度",
+        "product.quota.used": "已用",
+        "product.quota.expires": "到期时间",
+        "product.quota.unlimited": "不限额度",
+        "product.quota.unknown": "暂不可用",
+        "product.quota.refresh": "刷新",
+        "product.quota.recharge": "去充值",
+        "product.quota.updatedAt": "更新于 {{time}}",
+        "product.quota.loadFailed": "读取额度失败",
+        "product.agent.title": "vpapi 助手",
+        "product.agent.subtitle": "用 vpapi 的文本模型直接操作画布、生成图片和视频。",
+        "product.agent.newChat": "新对话",
+        "product.agent.stop": "停止",
+        "product.agent.thinking": "正在思考…",
+        "product.agent.working": "正在执行…",
+        "product.agent.modelRequired": "请先在设置里选择文本模型",
+        "product.agent.requestFailed": "助手请求失败：{{error}}",
+        "product.agent.empty": "试试让它读一下当前画布，或者直接说「帮我生成一张赛博朋克城市夜景」。",
+        "product.agent.confirmTools": "写操作需要确认",
+        "product.agent.allow": "执行",
+        "product.agent.deny": "跳过",
+        "product.agent.denied": "已跳过该操作",
+        "product.agent.useLocal": "改用本地 CLI Agent",
+        "product.agent.useBuiltin": "改用内置助手",
+        "product.agent.history": "历史对话",
+        "product.agent.placeholder": "描述你想要的效果，或让它读一下当前画布…",
+        "product.agent.canvasHint": "打开画布后可直接改动画布",
+        "product.agent.canvasRequired": "当前不在画布页面，请先打开一个画布项目再操作画布",
+        "product.agent.unknownTool": "未知工具：{{name}}",
+        "product.agent.stepLimit": "单轮工具调用已达上限，请直接告诉我下一步要做什么",
+        "product.agent.noTools": "当前模型不支持工具调用，只能对话；换一个模型可以让它直接改画布。",
+        "product.agent.degraded": "本次工具调用没有成功，已按普通对话回答。可重试，或换一个支持工具调用的模型。",
+        "product.agent.promptRequired": "请告诉我要生成什么内容",
+    },
+    "en-US": {
+        "product.connect.title": "Connect vpapi",
+        "product.connect.subtitle": "Paste your vpapi API key to start generating images, videos and working with the built-in assistant.",
+        "product.connect.keyLabel": "API key",
+        "product.connect.keyPlaceholder": "sk-...",
+        "product.connect.connect": "Connect",
+        "product.connect.connecting": "Reading models…",
+        "product.connect.connected": "Connected, {{count}} models imported",
+        "product.connect.hint": "No key yet? Create one on the vpapi keys page; quota and usage live there too.",
+        "product.connect.getKey": "Get an API key",
+        "product.connect.recharge": "Top up",
+        "product.connect.doc": "Read the docs",
+        "product.connect.gateway": "Gateway",
+        "product.connect.skip": "Later",
+        "product.connect.missingKey": "Enter your API key",
+        "product.connect.empty": "This key exposes no models; check its group or quota",
+        "product.connect.invalidKey": "The API key is invalid or disabled; copy a new one from vpapi",
+        "product.connect.groupRequired": "This key has no group yet; set a group on the vpapi keys page and retry",
+        "product.connect.quotaExhausted": "This key is out of quota; top up and retry",
+        "product.connect.unreachable": "Cannot reach vpapi ({{url}}); check your network and retry",
+        "product.connect.failed": "Connect failed: {{error}}",
+        "product.connect.freshStart": "Connecting re-reads the model list for this key.",
+        "product.channels.title": "vpapi connection",
+        "product.channels.connected": "Connected",
+        "product.channels.disconnected": "Not connected",
+        "product.channels.key": "API key",
+        "product.channels.gateway": "Gateway",
+        "product.channels.models": "Models",
+        "product.channels.modelSummary": "{{image}} image · {{video}} video · {{text}} text · {{audio}} audio",
+        "product.channels.defaults": "Default models",
+        "product.channels.reconnect": "Reload models",
+        "product.channels.changeKey": "Change key",
+        "product.channels.disconnect": "Disconnect",
+        "product.channels.disconnectConfirm": "This clears the locally stored key and model list. Continue?",
+        "product.channels.disconnectedDone": "Disconnected",
+        "product.channels.reconnectDone": "Models updated, {{count}} in total",
+        "product.channels.keyPlaceholder": "sk-...",
+        "product.channels.save": "Save and load models",
+        "product.channels.lockedHint": "This canvas only talks to vpapi; gateway and protocol are locked.",
+        "product.quota.title": "Remaining quota",
+        "product.quota.used": "Used",
+        "product.quota.expires": "Expires",
+        "product.quota.unlimited": "Unlimited",
+        "product.quota.unknown": "Unavailable",
+        "product.quota.refresh": "Refresh",
+        "product.quota.recharge": "Top up",
+        "product.quota.updatedAt": "Updated {{time}}",
+        "product.quota.loadFailed": "Failed to read quota",
+        "product.agent.title": "vpapi assistant",
+        "product.agent.subtitle": "Drive the canvas and generate images or videos with vpapi text models.",
+        "product.agent.newChat": "New chat",
+        "product.agent.stop": "Stop",
+        "product.agent.thinking": "Thinking…",
+        "product.agent.working": "Working…",
+        "product.agent.modelRequired": "Pick a text model in settings first",
+        "product.agent.requestFailed": "Assistant request failed: {{error}}",
+        "product.agent.empty": "Ask it to read the canvas, or say “generate a cyberpunk city night scene”.",
+        "product.agent.confirmTools": "Confirm write actions",
+        "product.agent.allow": "Run",
+        "product.agent.deny": "Skip",
+        "product.agent.denied": "Action skipped",
+        "product.agent.useLocal": "Use local CLI agent",
+        "product.agent.useBuiltin": "Use built-in assistant",
+        "product.agent.history": "History",
+        "product.agent.placeholder": "Describe what you want, or ask it to read the current canvas…",
+        "product.agent.canvasHint": "open a canvas to edit nodes",
+        "product.agent.canvasRequired": "Open a canvas project before using canvas tools",
+        "product.agent.unknownTool": "Unknown tool: {{name}}",
+        "product.agent.stepLimit": "Tool call limit for this turn reached; tell me what to do next",
+        "product.agent.noTools": "This model has no tool calling, so it can only chat; pick another model to let it edit the canvas.",
+        "product.agent.degraded": "Tool calling did not go through this time, so the reply is chat-only. Retry, or switch to a model with tool support.",
+        "product.agent.promptRequired": "Tell me what to generate",
+    },
+};
+
+/**
+ * 覆盖上游已存在的 key（例如站点标题）必须用嵌套结构：
+ * i18next 的 addResourceBundle 不会用扁平 key 覆盖已存在的嵌套值。
+ */
+const upstreamOverrides = {
+    "zh-CN": { meta: { title: BRAND.title, description: BRAND.description } },
+    "en-US": { meta: { title: BRAND.titleEn, description: BRAND.descriptionEn } },
+};
+
+let applied = false;
+
+/** 覆盖品牌与产品文案；重复调用只生效一次。 */
+export function applyProductI18nOverrides() {
+    if (applied) return;
+    applied = true;
+    for (const [locale, bundle] of Object.entries(overrides)) {
+        i18n.addResourceBundle(locale, "translation", bundle, true, true);
+    }
+    for (const [locale, bundle] of Object.entries(upstreamOverrides)) {
+        i18n.addResourceBundle(locale, "translation", bundle, true, true);
+    }
+}

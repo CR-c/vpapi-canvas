@@ -5,6 +5,9 @@ import { useTranslation } from "react-i18next";
 
 import { createModelChannel, useConfigStore } from "@/stores/use-config-store";
 import { usePromptSourceScheduler } from "@/hooks/use-prompt-source-scheduler";
+// [vpapi-canvas] fork：产品启动钩子与全局浮层（接入引导）。
+import { ProductOverlays, useProductBootstrap } from "@/product/bootstrap";
+import { PRODUCT_FLAGS } from "@/product/flags";
 
 export function ClientRootInit({ children }: { children: ReactNode }) {
     const { message } = App.useApp();
@@ -15,9 +18,13 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
     const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
 
     usePromptSourceScheduler();
+    // [vpapi-canvas] fork：品牌文案、一键接入与首启引导都由产品层处理。
+    useProductBootstrap();
 
     useEffect(() => {
         if (handledConfigParams.current) return;
+        // [vpapi-canvas] fork：接入参数交给 product/bootstrap.tsx 处理。
+        if (PRODUCT_FLAGS.lockGateway) return;
         const searchParams = new URLSearchParams(window.location.search);
         const baseUrl = searchParams.get("baseUrl") || searchParams.get("baseurl");
         const apiKey = searchParams.get("apiKey") || searchParams.get("apikey");
@@ -49,5 +56,11 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
         message.success(t("config.importedDirectConfig"));
     }, [config.channels, message, openConfigDialog, t, updateConfig]);
 
-    return <>{children}</>;
+    return (
+        <>
+            {children}
+            {/* [vpapi-canvas] fork：接入引导等产品浮层 */}
+            <ProductOverlays />
+        </>
+    );
 }

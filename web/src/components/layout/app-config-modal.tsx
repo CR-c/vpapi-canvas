@@ -14,6 +14,9 @@ import { exportAppConfig, importAppConfig } from "@/services/config-file";
 import { syncAppDataToWebdav, type AppSyncDomainKey, type AppSyncProgressEvent } from "@/services/app-sync";
 import { testWebdavConnection, WEBDAV_MANIFEST_FILE_NAME } from "@/services/webdav-sync";
 import { audioFormatOptions, audioVoiceOptions, normalizeAudioSpeedValue } from "@/lib/audio-generation";
+// [vpapi-canvas] fork：渠道页换成 vpapi 接入面板。
+import { PRODUCT_FLAGS } from "@/product/flags";
+import { ChannelsPanel } from "@/product/ui/channels-panel";
 import { createModelChannel, applyChannels, useConfigStore, type AiConfig, type ApiCallFormat, type ConfigTabKey, type ModelCapability, type ModelChannel } from "@/stores/use-config-store";
 
 type ModelGroup = {
@@ -183,7 +186,10 @@ export function AppConfigPanel({ showDoneButton = false, initialTab = "channels"
                     {
                         key: "channels",
                         label: t("config.tabs.channels"),
-                        children: (
+                        // [vpapi-canvas] fork：渠道管理页替换为 vpapi 接入面板（上游实现保留在下方分支）。
+                        children: PRODUCT_FLAGS.lockGateway ? (
+                            <ChannelsPanel />
+                        ) : (
                             <div>
                                 <ChannelQuickSetup />
                                 <div className="mb-4 flex flex-wrap items-center justify-between gap-3">

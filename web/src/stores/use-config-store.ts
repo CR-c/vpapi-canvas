@@ -4,6 +4,8 @@ import { persist } from "zustand/middleware";
 import { nanoid } from "nanoid";
 
 import i18n from "@/i18n";
+// [vpapi-canvas] fork 专用：网关地址来自品牌配置，避免在多处硬编码。
+import { GATEWAY_URL } from "@/product/brand";
 
 export type ApiCallFormat = "openai" | "gemini" | "vpapi";
 export type ModelCapability = "image" | "video" | "text" | "audio";
@@ -83,7 +85,7 @@ const CHANNEL_MODEL_SEPARATOR = "::";
 const OPENAI_BASE_URL = "https://api.openai.com";
 const GEMINI_BASE_URL = "https://generativelanguage.googleapis.com";
 /** Public gateway that speaks the vpapi protocol; users only need to paste their key. */
-export const VPAPI_BASE_URL = "https://api.zkki.net";
+export const VPAPI_BASE_URL = GATEWAY_URL;
 export const VPAPI_CHANNEL_ID = "vpapi";
 
 export const defaultConfig: AiConfig = {
@@ -247,10 +249,10 @@ export const useConfigStore = create<ConfigStore>()(
             shouldPromptContinue: false,
             updateConfig: (key, value) =>
                 set((state) => ({
-                    config: {
+                    config: lockProductConfig({
                         ...state.config,
                         [key]: value,
-                    },
+                    }),
                 })),
             updateWebdavConfig: (key, value) =>
                 set((state) => ({
@@ -285,7 +287,7 @@ export const useConfigStore = create<ConfigStore>()(
                 return {
                     ...current,
                     webdav: { ...defaultWebdavSyncConfig, ...persistedWebdav },
-                    config: {
+                    config: lockProductConfig({
                         ...config,
                         channelMode: "local",
                         apiFormat: normalizeApiFormat(config.apiFormat),
@@ -305,7 +307,7 @@ export const useConfigStore = create<ConfigStore>()(
                         videoGenerateAudio: config.videoGenerateAudio || "true",
                         videoWatermark: config.videoWatermark || "false",
                         canvasImageCount: config.canvasImageCount || "3",
-                    },
+                    }),
                 };
             },
         },
@@ -462,6 +464,38 @@ function pickDefaultModel(config: AiConfig, capability: ModelCapability, current
 function normalizeApiFormat(apiFormat: unknown): ApiCallFormat {
     if (apiFormat === "gemini" || apiFormat === "vpapi") return apiFormat;
     return "openai";
+}
+
+/**
+ * [vpapi-canvas] fork 专用：画布只对接 vpapi。
+ *
+ * 把配置收敛成「唯一的 vpapi 渠道 + 官方网关 + vpapi 协议」，模型、默认模型随之重算。
+ * 上游的渠道管理、协议切换与模型脚本入口因此不会生效（界面入口也已隐藏），
+ * 但上游代码保持原样，方便同步。用户填写的 API Key 会保留到这里。
+ */
+function lockProductConfig(config: AiConfig): AiConfig {
+    const source = config.channels.find((channel) => channel.id === VPAPI_CHANNEL_ID) || config.channels[0];
+    const channel = createModelChannel({
+        id: VPAPI_CHANNEL_ID,
+        name: "vpapi",
+        baseUrl: VPAPI_BASE_URL,
+        apiFormat: "vpapi",
+        apiKey: source?.apiKey ?? config.apiKey ?? "",
+        models: source ? source.models : normalizeChannelModels(config.models.map((item) => modelOptionName(item))),
+    });
+    const channels = [channel];
+    return {
+        ...config,
+        channels,
+        baseUrl: channel.baseUrl,
+        apiKey: channel.apiKey,
+        apiFormat: "vpapi",
+        models: modelOptionsFromChannels(channels),
+        imageModel: normalizeModelOptionValue(config.imageModel || config.model, channels),
+        videoModel: normalizeModelOptionValue(config.videoModel, channels),
+        textModel: normalizeModelOptionValue(config.textModel || config.model, channels),
+        audioModel: normalizeModelOptionValue(config.audioModel || defaultConfig.audioModel, channels),
+    };
 }
 
 function uniqueModelOptions(models: string[]) {

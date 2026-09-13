@@ -1,44 +1,49 @@
 <p align="center">
-  <img src="web/public/logo.svg" width="96" alt="infinite-canvas logo">
+  <img src="web/public/logo.svg" width="96" alt="vpapi canvas logo">
 </p>
 
-<h1 align="center">无限画布 (infinite-canvas)</h1>
+<h1 align="center">vpapi 画布</h1>
 
 <p align="center">
-  <a href="https://linux.do/"><img src="https://img.shields.io/badge/Linux.do-Community-2b6de8?style=flat-square" alt="Linux.do"></a>
-  <a href="https://render.com/deploy?repo=https://github.com/basketikun/infinite-canvas"><img src="https://img.shields.io/badge/Render-Deploy-46e3b7?style=flat-square&logo=render&logoColor=111111" alt="Deploy to Render"></a>
-  <a href="https://github.com/basketikun/infinite-canvas"><img src="https://img.shields.io/github/stars/basketikun/infinite-canvas?style=flat-square&logo=github" alt="GitHub stars"></a>
-  <a href="https://github.com/basketikun/infinite-canvas/tags"><img src="https://img.shields.io/github/v/tag/basketikun/infinite-canvas?style=flat-square&label=version" alt="Version"></a>
+  <b>专供 vpapi 的无限画布创作前端</b>：一个 API Key 快速接入，生图、生视频、内置助手创作，全程消耗 vpapi 额度。
+</p>
+
+<p align="center">
+  <a href="https://github.com/CR-c/vpapi-canvas"><img src="https://img.shields.io/github/stars/CR-c/vpapi-canvas?style=flat-square&logo=github" alt="GitHub stars"></a>
+  <a href="https://github.com/CR-c/vpapi-canvas/tags"><img src="https://img.shields.io/github/v/tag/CR-c/vpapi-canvas?style=flat-square&label=version" alt="Version"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-f97316?style=flat-square" alt="License"></a>
   <a href="https://vite.dev/"><img src="https://img.shields.io/badge/Vite-7-646cff?style=flat-square&logo=vite&logoColor=white" alt="Vite"></a>
-  <a href="https://reactrouter.com/"><img src="https://img.shields.io/badge/React_Router-7-ca4245?style=flat-square&logo=reactrouter&logoColor=white" alt="React Router"></a>
 </p>
 
 <p align="center">
-<a href="https://trendshift.io/repositories/50077?utm_source=repository-badge&amp;utm_medium=badge&amp;utm_campaign=badge-repository-50077" target="_blank" rel="noopener noreferrer"><img src="https://trendshift.io/api/badge/repositories/50077" alt="basketikun%2Finfinite-canvas | Trendshift" width="250" height="55"/></a>
+  <a href="DEPLOY.md">部署指南</a> · <a href="FORK.md">fork 说明与上游同步</a> · <a href="docs/content/docs/overview/features.mdx">功能介绍</a> · <a href="plugins/infinite-canvas">Codex app 插件</a>
 </p>
 
-<p align="center">
-  <a href="docs/content/docs/overview/quick-start.mdx">快速开始</a> · <a href="docs/content/docs/overview/features.mdx">功能介绍</a> · <a href="docs/content/docs/overview/render.mdx">Render 部署</a> · <a href="docs/content/docs/overview/docker.mdx">Docker 部署</a> · <a href="docs/content/docs/canvas/canvas-node-manual.mdx">画布节点操作手册</a> · <a href="docs/content/docs/canvas/canvas-shortcuts.mdx">画布快捷键</a> · <a href="SECURITY.md">漏洞提交</a> · <a href="docs/content/docs/progress/todo.mdx">待办事项</a> · <a href="canvas-agent/README.md">本地 Canvas Agent</a> · <a href="plugins/infinite-canvas">Codex app 插件</a>
-</p>
+本项目是 [basketikun/infinite-canvas](https://github.com/basketikun/infinite-canvas) 的 fork，改造为 **vpapi 专用创作画布**：网关地址与协议固定，用户只需要一把 vpapi API Key。
 
-无限画布是一款面向图片创作的开源工作台。它把画布编排、AI 图片生成、参考图编辑、对话助手、提示词库和素材沉淀放在同一个界面里，适合用来探索视觉方案并连续迭代图片结果。
+## 用户怎么用
 
-## 一键部署 · 填 Key 即用
+1. 在 vpapi 站点注册并创建一个 API Key（<https://vp.zkki.net/keys>）。
+2. 打开画布，粘贴 Key —— 画布会自动按网关公布的能力导入全部生图 / 视频 / 文本模型并设好默认项。
+3. 直接在无限画布上生图、生视频，或用右侧内置助手对话创作；顶栏实时显示这把 Key 的剩余额度。
 
-本项目**原生内置 vpapi 协议**，默认对接 `https://api.zkki.net`。用户部署后只需在右上角「配置」里粘贴自己的 API Key 并点击「接入并拉取模型」，画布就会自动按网关公布的能力标签导入全部**文生/图生/视频**模型并设好默认项，无需手动配置任何 Base URL 或模型。
-
-> 完整、带 AI 部署提示词的小白指南见 **[DEPLOY.md](DEPLOY.md)**。
+> 完整、带 AI 部署提示词的小白指南见 **[DEPLOY.md](DEPLOY.md)**；fork 与上游同步方式见 **[FORK.md](FORK.md)**。
 
 ```bash
 # 纯静态、无数据库、无后端。一条命令即可启动：
-docker run -d --name infinite-canvas -p 3000:3000 --restart unless-stopped ghcr.io/cr-c/vpapi-canvas:latest
+docker run -d --name vpapi-canvas -p 3000:3000 --restart unless-stopped ghcr.io/cr-c/vpapi-canvas:latest
 ```
 
 > [!CAUTION]
 > 项目目前处于开发阶段，不保证历史数据兼容。各种本地存储格式都可能直接调整，欢迎关注后续更新。
 >
-> 如果你需要稳定维护自己的分支，建议自行 fork 后独立开发。二次开发与 PR 请保留原作者信息和前端页面标识。
+> 二次开发与 PR 请保留原作者信息与前端页面标识；本 fork 的新功能请按 [FORK.md](FORK.md) 的约定写在 `web/src/product/` 下。
+
+## 与上游的关系
+
+- 上游：<https://github.com/basketikun/infinite-canvas>（`origin`），本项目会持续同步上游更新。
+- 上游原版的通用能力（多渠道、协议切换、模型脚本等）代码仍然保留，只是在本产品里不再暴露入口。
+- 同步方式、补丁点清单和冲突处理见 [FORK.md](FORK.md)。
 
 ## 赞助商
 
