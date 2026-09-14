@@ -90,9 +90,20 @@ function formatAmount(value: number, currency: string) {
     return `${currencySymbol(currency)}${value.toFixed(2)}`;
 }
 
+/** 兼容两种入参：编码值（`渠道id::模型名`）或纯模型名。 */
+function lookupPrice(value: string): ModelPrice | undefined {
+    const key = (value || "").trim();
+    if (!key) return undefined;
+    const map = readModelPricing();
+    if (map[key]) return map[key];
+    const name = key.includes("::") ? key.slice(key.lastIndexOf("::") + 2) : key;
+    const matched = Object.keys(map).find((item) => (item.includes("::") ? item.slice(item.lastIndexOf("::") + 2) : item) === name);
+    return matched ? map[matched] : undefined;
+}
+
 /** 生成前提示文案；拿不到价格时返回空串（不打扰用户）。 */
 export function generationCostNotice(encodedModel: string, options: { count?: number; seconds?: number } = {}) {
-    const price = readModelPricing()[encodedModel];
+    const price = lookupPrice(encodedModel);
     if (!price) return "";
     const count = Math.max(1, Math.floor(options.count || 1));
     if (price.unit === "call") {
@@ -106,7 +117,7 @@ export function generationCostNotice(encodedModel: string, options: { count?: nu
 
 /** 模型价格摘要（设置面板展示用）。 */
 export function modelPriceSummary(encodedModel: string) {
-    const price = readModelPricing()[encodedModel];
+    const price = lookupPrice(encodedModel);
     if (!price) return "";
     if (price.unit === "call") return i18n.t("product.cost.perCall", { amount: formatAmount(price.amount, price.currency) });
     if (price.perSecond) return i18n.t("product.cost.perSecond", { amount: formatAmount(price.perSecond, price.currency) });
