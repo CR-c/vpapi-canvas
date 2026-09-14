@@ -134,16 +134,16 @@ export const useProductAgentStore = create<ProductAgentStore>()(
 export function productAgentModels() {
     const { config } = useConfigStore.getState();
     const map = readModelEndpoints();
-    const chatModels = selectableModelsByCapability(config).filter((value) => isChatModel(modelOptionName(value), map));
+    const chatModels = selectableModelsByCapability(config).filter((value) => isChatModel(value, map));
     const values = chatModels.length ? chatModels : selectableModelsByCapability(config, "text");
     const rank = (value: string) => {
-        const support = isToolsModel(modelOptionName(value));
+        const support = isToolsModel(value);
         return support === true ? 0 : support === undefined ? 1 : 2;
     };
     return [...values].sort((a, b) => rank(a) - rank(b)).map((value) => ({ value, label: modelOptionLabel(config, value) }));
 }
 
-async function runLoop({ thread, request, navigate, signal }: { thread: ProductAgentThread; request: { baseUrl: string; apiKey: string; model: string }; navigate: NavigateFunction; signal: AbortSignal }) {
+async function runLoop({ thread, request, navigate, signal }: { thread: ProductAgentThread; request: { baseUrl: string; apiKey: string; model: string; modelKey: string }; navigate: NavigateFunction; signal: AbortSignal }) {
     for (let step = 0; step < MAX_STEPS; step += 1) {
         const itemId = nanoid();
         let text = "";
@@ -153,6 +153,7 @@ async function runLoop({ thread, request, navigate, signal }: { thread: ProductA
             baseUrl: request.baseUrl,
             apiKey: request.apiKey,
             model: request.model,
+            modelKey: request.modelKey,
             instructions: PRODUCT_AGENT_PROMPT,
             messages: thread.messages,
             tools: productToolSchemas(),
@@ -220,9 +221,10 @@ async function executeTool(call: AgentToolCall, navigate: NavigateFunction, sign
 function resolveRequest(selected: string) {
     const { config } = useConfigStore.getState();
     const fallback = productAgentModels()[0]?.value || "";
-    const requestConfig = resolveModelRequestConfig(config, selected || config.textModel || fallback);
+    const modelKey = selected || config.textModel || fallback;
+    const requestConfig = resolveModelRequestConfig(config, modelKey);
     if (!requestConfig.model || !requestConfig.apiKey.trim()) return null;
-    return { baseUrl: requestConfig.baseUrl, apiKey: requestConfig.apiKey, model: requestConfig.model };
+    return { baseUrl: requestConfig.baseUrl, apiKey: requestConfig.apiKey, model: requestConfig.model, modelKey };
 }
 
 function ensureThread(get: () => ProductAgentStore, set: (patch: Partial<ProductAgentStore>) => void) {

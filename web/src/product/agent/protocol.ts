@@ -18,6 +18,8 @@ export type AgentRequest = {
     baseUrl: string;
     apiKey: string;
     model: string;
+    /** 画布内部编码的模型标识（`渠道id::模型名`），用于查端点能力与工具支持。 */
+    modelKey: string;
     instructions: string;
     messages: TurnMessage[];
     tools: ToolSchema[];
@@ -72,13 +74,13 @@ export async function streamAgentTurn(request: AgentRequest, protocol: "chat" | 
 }
 
 export async function runAgentTurnWithFallback(request: AgentRequest): Promise<AgentTurnResult> {
-    const protocol = agentProtocolFor(request.model);
+    const protocol = agentProtocolFor(request.modelKey);
     if (protocol === "responses") return streamWithToolsFallback(request, "responses");
     try {
         return await streamWithToolsFallback(request, "chat");
     } catch (error) {
         if (!isResponsesOnlyError(error)) throw error;
-        rememberProtocol(request.model, "responses");
+        rememberProtocol(request.modelKey, "responses");
         return streamWithToolsFallback(request, "responses");
     }
 }
@@ -89,13 +91,13 @@ async function streamWithToolsFallback(request: AgentRequest, protocol: "chat" |
         const result = await streamAgentTurn({ ...request, tools: [], instructions: chatOnlyInstructions(request.instructions) }, protocol);
         return degraded ? { ...result, degradedTools: true } : result;
     };
-    const tools = isToolsModel(request.model) === false ? [] : request.tools;
+    const tools = isToolsModel(request.modelKey) === false ? [] : request.tools;
     if (!tools.length) return chatOnly(request.tools.length > 0);
 
     for (let attempt = 0; attempt < TOOL_ATTEMPT_LIMIT; attempt += 1) {
         try {
             const result = await streamAgentTurn({ ...request, tools }, protocol);
-            rememberToolSupport(request.model, true);
+            rememberToolSupport(request.modelKey, true);
             return result;
         } catch (error) {
             // 上游偶尔会因为 tools 报 invalid argument，重试一次通常就好了。
@@ -103,7 +105,7 @@ async function streamWithToolsFallback(request: AgentRequest, protocol: "chat" |
                 await delay(1200 * (attempt + 1), request.signal);
                 continue;
             }
-            if (isFunctionCallingUnsupported(error)) rememberToolSupport(request.model, false);
+            if (isFunctionCallingUnsupported(error)) rememberToolSupport(request.modelKey, false);
             if (!isFunctionCallingUnsupported(error) && !isProviderFlake(error)) throw error;
             return chatOnly(true);
         }

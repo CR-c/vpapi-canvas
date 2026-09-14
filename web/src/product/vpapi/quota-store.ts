@@ -15,9 +15,10 @@ type QuotaState = {
     unlimited: boolean;
     expiresAt: number;
     symbol: string;
+    scope: "account" | "key";
     updatedAt: number;
     error: string;
-    /** 拉取当前 Key 的额度；`force` 用于用户手动刷新。 */
+    /** 拉取额度；`force` 用于用户手动刷新。 */
     refresh: (force?: boolean) => Promise<void>;
     /** 生成完成后触发，避免每次生成都打接口。 */
     touch: () => void;
@@ -31,11 +32,12 @@ export const useQuotaStore = create<QuotaState>()((set, get) => ({
     unlimited: false,
     expiresAt: 0,
     symbol: "",
+    scope: "key",
     updatedAt: 0,
     error: "",
     refresh: async (force = false) => {
         const { config } = useConfigStore.getState();
-        if (!config.apiKey.trim()) {
+        if (!config.channels.some((channel) => channel.apiKey.trim())) {
             set({ status: "idle", error: "" });
             return;
         }

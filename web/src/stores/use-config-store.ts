@@ -4,8 +4,9 @@ import { persist } from "zustand/middleware";
 import { nanoid } from "nanoid";
 
 import i18n from "@/i18n";
-// [vpapi-canvas] fork 专用：网关地址来自品牌配置，避免在多处硬编码。
+// [vpapi-canvas] fork 专用：网关地址与能力槽位来自产品层，避免在多处硬编码。
 import { GATEWAY_URL } from "@/product/brand";
+import { KEY_SLOTS, SLOT_CHANNEL_ID } from "@/product/vpapi/slots";
 
 export type ApiCallFormat = "openai" | "gemini" | "vpapi";
 export type ModelCapability = "image" | "video" | "text" | "audio";
@@ -469,26 +470,30 @@ function normalizeApiFormat(apiFormat: unknown): ApiCallFormat {
 /**
  * [vpapi-canvas] fork 专用：画布只对接 vpapi。
  *
- * 把配置收敛成「唯一的 vpapi 渠道 + 官方网关 + vpapi 协议」，模型、默认模型随之重算。
- * 上游的渠道管理、协议切换与模型脚本入口因此不会生效（界面入口也已隐藏），
- * 但上游代码保持原样，方便同步。用户填写的 API Key 会保留到这里。
+ * 把配置收敛成「一组 vpapi 渠道（按能力槽位存放各自的 API Key）+ 官方网关 + vpapi 协议」，
+ * 模型、默认模型随之重算。上游的渠道管理、协议切换与模型脚本入口因此不会生效
+ * （界面入口也已隐藏），但上游代码保持原样，方便同步。
  */
 function lockProductConfig(config: AiConfig): AiConfig {
-    const source = config.channels.find((channel) => channel.id === VPAPI_CHANNEL_ID) || config.channels[0];
-    const channel = createModelChannel({
-        id: VPAPI_CHANNEL_ID,
-        name: "vpapi",
-        baseUrl: VPAPI_BASE_URL,
-        apiFormat: "vpapi",
-        apiKey: source?.apiKey ?? config.apiKey ?? "",
-        models: source ? source.models : normalizeChannelModels(config.models.map((item) => modelOptionName(item))),
-    });
-    const channels = [channel];
+    const channels = KEY_SLOTS.map((slot) => {
+        const id = SLOT_CHANNEL_ID[slot];
+        const source = config.channels.find((channel) => channel.id === id);
+        return createModelChannel({
+            id,
+            name: `vpapi · ${slot}`,
+            baseUrl: VPAPI_BASE_URL,
+            apiFormat: "vpapi",
+            // 文本槽位沿用旧版单 Key 配置（历史配置的渠道 id 就是它）。
+            apiKey: source?.apiKey || (slot === "text" ? config.apiKey || "" : ""),
+            models: source?.models || [],
+        });
+    }).filter((channel, index) => index === 0 || channel.apiKey.trim() || channel.models.length);
+    const primary = channels[0];
     return {
         ...config,
         channels,
-        baseUrl: channel.baseUrl,
-        apiKey: channel.apiKey,
+        baseUrl: primary.baseUrl,
+        apiKey: primary.apiKey,
         apiFormat: "vpapi",
         models: modelOptionsFromChannels(channels),
         imageModel: normalizeModelOptionValue(config.imageModel || config.model, channels),

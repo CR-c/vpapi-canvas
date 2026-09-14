@@ -34,6 +34,7 @@ export function QuotaChip() {
     const symbol = useQuotaStore((state) => state.symbol);
     const expiresAt = useQuotaStore((state) => state.expiresAt);
     const unlimited = useQuotaStore((state) => state.unlimited);
+    const scope = useQuotaStore((state) => state.scope);
     const updatedAt = useQuotaStore((state) => state.updatedAt);
     const connected = Boolean(apiKey.trim());
 
@@ -58,7 +59,7 @@ export function QuotaChip() {
             content={
                 <div className="w-56 space-y-2 text-xs">
                     <div className="flex justify-between gap-3">
-                        <span className="text-stone-500">{t("product.quota.title")}</span>
+                        <span className="text-stone-500">{t(scope === "account" ? "product.quota.account" : "product.quota.keyOnly")}</span>
                         <span className="font-medium">{unlimited ? t("product.quota.unlimited") : formatAmount(remaining, symbol)}</span>
                     </div>
                     <div className="flex justify-between gap-3">
@@ -77,7 +78,12 @@ export function QuotaChip() {
                             {t("product.quota.recharge")}
                         </a>
                     </div>
-                    {updatedAt ? <div className="text-[11px] text-stone-400">{t("product.quota.updatedAt", { time: new Date(updatedAt).toLocaleTimeString() })}</div> : null}
+                    {updatedAt ? (
+                        <div className="text-[11px] text-stone-400">
+                            {t("product.quota.updatedAt", { time: new Date(updatedAt).toLocaleTimeString() })}
+                            {scope === "key" ? ` · ${t("product.quota.keyScopeHint")}` : ""}
+                        </div>
+                    ) : null}
                 </div>
             }
         >

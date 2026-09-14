@@ -11,8 +11,9 @@ import { productAgentModels, useProductAgentStore } from "@/product/agent/store"
 import { PRODUCT_FLAGS } from "@/product/flags";
 import { useProductStore } from "@/product/store";
 import { readModelEndpoints, refreshModelEndpoints, isToolsModel } from "@/product/vpapi/model-endpoints";
+import { slotOfChannel } from "@/product/vpapi/slots";
 import { useAgentStore } from "@/stores/use-agent-store";
-import { modelOptionName, useConfigStore } from "@/stores/use-config-store";
+import { useConfigStore } from "@/stores/use-config-store";
 import { useThemeStore } from "@/stores/use-theme-store";
 
 /** 内置 Agent 面板：走 vpapi 的文本模型，工具直接在浏览器里操作画布。 */
@@ -36,20 +37,23 @@ export function ProductAgentPanel() {
     const [agentModels, setAgentModels] = useState(() => productAgentModels());
     const currentModel = model || config.textModel || agentModels[0]?.value || "";
 
-    // 端点能力缓存用于挑选支持对话的模型；缺失时补一次并刷新列表。
+    // 端点能力缓存用于挑选支持对话的模型；缺失时按每个已接入的 Key 补一次并刷新列表。
     useEffect(() => {
         if (!connected) {
             setAgentModels(productAgentModels());
             return;
         }
-        if (Object.keys(readModelEndpoints()).length) {
+        const pending = config.channels.filter((channel) => channel.apiKey.trim() && !Object.keys(readModelEndpoints()).some((key) => key.startsWith(`${channel.id}::`)));
+        if (!pending.length) {
             setAgentModels(productAgentModels());
             return;
         }
-        void refreshModelEndpoints(config.apiKey)
-            .then(() => setAgentModels(productAgentModels()))
-            .catch(() => null);
-    }, [connected, config.apiKey]);
+        void Promise.all(
+            pending.map((channel) =>
+                refreshModelEndpoints(channel.apiKey, slotOfChannel(channel.id) || "text").catch(() => null),
+            ),
+        ).then(() => setAgentModels(productAgentModels()));
+    }, [connected, config.channels]);
 
     const submit = () => {
         const text = prompt.trim();
@@ -109,7 +113,7 @@ export function ProductAgentPanel() {
 
             <div className="shrink-0 px-4 pb-2 text-xs" style={{ color: theme.node.muted }}>
                 {connected ? `${currentModel || t("product.agent.modelRequired")}${canvasReady ? "" : ` · ${t("product.agent.canvasHint")}`}` : t("product.connect.title")}
-                {connected && isToolsModel(modelOptionName(currentModel)) === false ? <div className="mt-0.5">{t("product.agent.noTools")}</div> : null}
+                {connected && isToolsModel(currentModel) === false ? <div className="mt-0.5">{t("product.agent.noTools")}</div> : null}
             </div>
 
             {messages.length ? (
