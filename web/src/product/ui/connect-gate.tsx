@@ -80,7 +80,8 @@ export function ConnectGate() {
                             <span className="w-24 shrink-0 text-xs text-stone-500">{t(`product.keys.${slot}`)}</span>
                             <Input.Password
                                 value={keys[slot]}
-                                autoComplete="off"
+                                name={`vpapi-key-${slot}`}
+                                autoComplete="new-password"
                                 placeholder={slot === "text" ? t("product.connect.keyPlaceholder") : t("product.keys.optional")}
                                 onChange={(event) => setKeys((current) => ({ ...current, [slot]: event.target.value }))}
                                 onPressEnter={() => void connect()}

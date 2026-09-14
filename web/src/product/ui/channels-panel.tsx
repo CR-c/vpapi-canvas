@@ -1,10 +1,10 @@
-import { App, Button, Input, Tag } from "antd";
+import { Alert, App, Button, Input, Tag } from "antd";
 import { RefreshCw, Unplug } from "lucide-react";
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { LINKS } from "@/product/brand";
-import { applyGatewayKey, disconnectGateway, gatewayUrl, reloadGatewayModels } from "@/product/vpapi/client";
+import { applyGatewayKey, cleanupDuplicateKeys, disconnectGateway, duplicateKeySlots, gatewayUrl, reloadGatewayModels } from "@/product/vpapi/client";
 import { useQuotaStore } from "@/product/vpapi/quota-store";
 import { KEY_SLOTS, SLOT_CHANNEL_ID, type KeySlot } from "@/product/vpapi/slots";
 import { modelOptionName, useConfigStore, type ChannelModel, type ModelCapability } from "@/stores/use-config-store";
@@ -16,7 +16,7 @@ const CAPABILITIES: ModelCapability[] = ["image", "video", "text", "audio"];
 function maskKey(key: string) {
     const value = key.trim();
     if (value.length <= 8) return value ? "••••" : "";
-    return `${value.slice(0, 4)}••••${value.slice(-4)}`;
+    return `${value.slice(0, 6)}••••${value.slice(-4)}`;
 }
 
 function countByCapability(models: ChannelModel[]) {
@@ -36,6 +36,7 @@ export function ChannelsPanel() {
     const config = useConfigStore((state) => state.config);
     const connected = config.channels.filter((channel) => channel.apiKey.trim());
     const counts = useMemo(() => countByCapability(config.channels.flatMap((channel) => channel.models)), [config.channels]);
+    const duplicates = useMemo(() => duplicateKeySlots(config), [config]);
 
     const disconnect = (slot?: KeySlot) => {
         modal.confirm({
@@ -83,6 +84,26 @@ export function ChannelsPanel() {
                 </div>
             </div>
 
+            {duplicates.length ? (
+                <Alert
+                    type="warning"
+                    showIcon
+                    message={t("product.channels.duplicateKeys", { slots: duplicates.map((slot) => t(`product.keys.${slot}`)).join("、") })}
+                    action={
+                        <Button
+                            size="small"
+                            onClick={() => {
+                                const cleared = cleanupDuplicateKeys();
+                                message.success(t("product.channels.duplicateCleared", { count: cleared.length }));
+                                void useQuotaStore.getState().refresh(true);
+                            }}
+                        >
+                            {t("product.channels.duplicateCleanup")}
+                        </Button>
+                    }
+                />
+            ) : null}
+
             <div className="space-y-2">
                 {KEY_SLOTS.map((slot) => (
                     <SlotRow key={slot} slot={slot} />
@@ -107,9 +128,11 @@ function SlotRow({ slot }: { slot: KeySlot }) {
     const channel = useConfigStore((state) => state.config.channels.find((item) => item.id === SLOT_CHANNEL_ID[slot]));
     const [apiKey, setApiKey] = useState("");
     const [busy, setBusy] = useState<"connect" | "reload" | "">("");
+    const [editing, setEditing] = useState(false);
     const models = channel?.models || [];
     const counts = useMemo(() => countByCapability(models), [models]);
     const isConnected = Boolean(channel?.apiKey.trim());
+    const showInput = !isConnected || editing;
 
     const connect = async () => {
         const key = apiKey.trim();
@@ -121,6 +144,7 @@ function SlotRow({ slot }: { slot: KeySlot }) {
         try {
             const count = await applyGatewayKey(key, slot);
             setApiKey("");
+            setEditing(false);
             message.success(t("product.connect.connected", { count }));
             void useQuotaStore.getState().refresh(true);
         } catch (error) {
@@ -152,9 +176,12 @@ function SlotRow({ slot }: { slot: KeySlot }) {
                         <span className="text-xs text-stone-500">{t("product.channels.modelSummary", { image: counts.image, video: counts.video, text: counts.text, audio: counts.audio })}</span>
                     ) : null}
                 </div>
-                {isConnected ? (
+                {!showInput ? (
                     <div className="flex items-center gap-2">
                         <span className="text-xs text-stone-500">{maskKey(channel?.apiKey || "")}</span>
+                        <Button size="small" onClick={() => setEditing(true)}>
+                            {t("product.channels.changeKey")}
+                        </Button>
                         <Button size="small" icon={<RefreshCw className="size-3.5" />} loading={busy === "reload"} onClick={() => void reload()}>
                             {t("product.channels.reconnect")}
                         </Button>
@@ -163,18 +190,24 @@ function SlotRow({ slot }: { slot: KeySlot }) {
                         </Button>
                     </div>
                 ) : (
-                    <div className="flex min-w-[260px] flex-1 items-center justify-end gap-2">
+                    <div className="flex min-w-[280px] flex-1 items-center justify-end gap-2">
                         <Input.Password
-                            className="max-w-[260px]"
+                            className="max-w-[280px]"
                             value={apiKey}
-                            autoComplete="off"
+                            name={`vpapi-key-${slot}`}
+                            autoComplete="new-password"
                             placeholder={t("product.channels.keyPlaceholder")}
                             onChange={(event) => setApiKey(event.target.value)}
                             onPressEnter={() => void connect()}
                         />
                         <Button size="small" type="primary" loading={busy === "connect"} onClick={() => void connect()}>
-                            {t("product.connect.connect")}
+                            {t("product.channels.save")}
                         </Button>
+                        {isConnected ? (
+                            <Button size="small" onClick={() => { setEditing(false); setApiKey(""); }}>
+                                {t("common.cancel")}
+                            </Button>
+                        ) : null}
                     </div>
                 )}
             </div>

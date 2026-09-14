@@ -138,9 +138,23 @@ async function probeGateway(apiKey: string): Promise<string | null> {
     }
 }
 
+/** 某把 Key 已经接在哪个槽位（同一把 Key 只接一个槽位，模型会自动按能力归类）。 */
+export function slotOfExistingKey(config: AiConfig, apiKey: string): KeySlot | undefined {
+    const key = apiKey.trim();
+    if (!key) return undefined;
+    for (const channel of config.channels) {
+        if (channel.apiKey.trim() !== key) continue;
+        const slot = slotOfChannel(channel.id);
+        if (slot) return slot;
+    }
+    return undefined;
+}
+
 /** 用一把 Key 接入某个能力槽位：读取模型目录并写入配置（配置写入会经过 lockProductConfig）。 */
 export async function applyGatewayKey(apiKey: string, slot: KeySlot = "text"): Promise<number> {
     const { config, updateConfig } = useConfigStore.getState();
+    const duplicate = slotOfExistingKey(config, apiKey);
+    if (duplicate && duplicate !== slot) throw new Error(i18n.t("product.keys.duplicate", { slot: i18n.t(`product.keys.${duplicate}`) }));
     const models = await connectGateway(apiKey);
     const channel = createGatewayChannel(apiKey, models, slot);
     const channels = sortSlotChannels([...config.channels.filter((item) => item.id !== channel.id), channel]);
@@ -153,12 +167,18 @@ export async function applyGatewayKey(apiKey: string, slot: KeySlot = "text"): P
 
 export type SlotConnectResult = { slot: KeySlot; ok: boolean; models?: number; error?: string };
 
-/** 一次接入多个槽位的 Key（留空的跳过）；某个槽位失败不影响其它槽位。 */
+/** 一次接入多个槽位的 Key（留空的跳过）；同一把 Key 只接第一个填写的槽位，某个槽位失败不影响其它槽位。 */
 export async function applyGatewayKeys(keys: Partial<Record<KeySlot, string>>): Promise<SlotConnectResult[]> {
     const results: SlotConnectResult[] = [];
+    const seen = new Set<string>();
     for (const slot of KEY_SLOTS) {
         const apiKey = (keys[slot] || "").trim();
         if (!apiKey) continue;
+        if (seen.has(apiKey)) {
+            results.push({ slot, ok: false, error: i18n.t("product.keys.duplicateInForm") });
+            continue;
+        }
+        seen.add(apiKey);
         try {
             results.push({ slot, ok: true, models: await applyGatewayKey(apiKey, slot) });
         } catch (error) {
@@ -199,4 +219,38 @@ export function disconnectGateway(slot?: KeySlot) {
         return channelSlot && targets.includes(channelSlot) ? createGatewayChannel("", [], channelSlot) : channel;
     });
     updateConfig("channels", sortSlotChannels(channels));
+}
+
+/** 同一把 Key 出现在多个槽位的槽位列表（正常只应出现在一个槽位）。 */
+export function duplicateKeySlots(config: AiConfig): KeySlot[] {
+    const seen = new Set<string>();
+    const duplicates: KeySlot[] = [];
+    for (const channel of config.channels) {
+        const slot = slotOfChannel(channel.id);
+        const key = channel.apiKey.trim();
+        if (!slot || !key) continue;
+        if (seen.has(key)) duplicates.push(slot);
+        else seen.add(key);
+    }
+    return duplicates;
+}
+
+/** 清理重复的 Key：同一把 Key 只保留第一个槽位，返回被清掉的槽位。 */
+export function cleanupDuplicateKeys(): KeySlot[] {
+    const { config, updateConfig } = useConfigStore.getState();
+    const seen = new Set<string>();
+    const cleared: KeySlot[] = [];
+    const channels = config.channels.map((channel) => {
+        const slot = slotOfChannel(channel.id);
+        const key = channel.apiKey.trim();
+        if (!slot || !key) return channel;
+        if (!seen.has(key)) {
+            seen.add(key);
+            return channel;
+        }
+        cleared.push(slot);
+        return createGatewayChannel("", [], slot);
+    });
+    if (cleared.length) updateConfig("channels", sortSlotChannels(channels));
+    return cleared;
 }
