@@ -5,6 +5,8 @@ import i18n from "@/i18n";
 import { ImageSettingsTheme } from "@/components/image-settings-panel";
 import { type CanvasTheme } from "@/lib/canvas-theme";
 import { resolveModelVideoSpec, videoResolutionNumber, videoSpecResolution, videoSpecSeconds, type AiConfig } from "@/stores/use-config-store";
+// [vpapi-canvas] fork：画幅换算与视频请求共用一份实现（比例标签不能再一律当横屏）。
+import { normalizeVideoSize } from "@/services/api/video";
 
 const resolutionOptions = [
     { value: "480", label: "480p" },
@@ -127,10 +129,9 @@ export function videoSecondsLabel(value: string) {
     return `${value || "6"}s`;
 }
 
+/** [vpapi-canvas] fork：与请求侧共用同一套画幅换算，面板选中的挡位与实际发送的一致。 */
 export function normalizeVideoSizeValue(value: string) {
-    if (value === "auto") return "auto";
-    if (/^\d+x\d+$/.test(value || "")) return value;
-    return ["9:16", "2:3", "3:4"].includes(value) ? "720x1280" : "1280x720";
+    return normalizeVideoSize(value) ?? "auto";
 }
 
 export function normalizeVideoResolutionValue(value: string) {

@@ -151,11 +151,16 @@ export async function storeGeneratedVideo(result: VideoGenerationResult): Promis
 async function createOpenAIVideoTask(config: AiConfig, model: string, prompt: string, references: ReferenceImage[], options?: VideoMediaOptions): Promise<VideoGenerationTask> {
     const modelName = modelOptionName(model);
     const spec = resolveModelVideoSpec(config, model);
+    const size = normalizeVideoSize(config.size);
+    const ratio = videoRatioForSize(size, spec);
     const body: Record<string, unknown> = {
         model: modelName,
         prompt,
         seconds: adaptVideoSeconds(config.videoSeconds, modelName, spec),
-        ...(normalizeVideoSize(config.size) ? { size: normalizeVideoSize(config.size) } : {}),
+        ...(size ? { size } : {}),
+        // 网关的视频渠道从 ratio / aspect_ratio 取画幅（size 只当分辨率用），读哪个字段各渠道不同：
+        // KYY / ZZ / Xing / KZ / 临辉 等读 aspect_ratio，TM / GuysCode 等读 ratio，镇镇只读 metadata.ratio。
+        ...(ratio ? { ratio, aspect_ratio: ratio, metadata: { ratio } } : {}),
         resolution: adaptVideoResolution(config.vquality, modelName, spec),
         preset: "normal",
     };
@@ -244,11 +249,61 @@ function normalizeVideoSeconds(value: string) {
     return String(Math.max(1, Math.min(20, seconds)));
 }
 
-function normalizeVideoSize(value: string) {
-    if (value === "auto") return null;
-    const size = value || "1280x720";
-    if (/^\d+x\d+$/.test(size)) return size;
-    return ["9:16", "2:3", "3:4"].includes(size) ? "720x1280" : "1280x720";
+/**
+ * 画布的画幅值 → 请求里的像素尺寸；`auto` 返回 null，表示交给网关自适应。
+ *
+ * 有的上游按 `size` 判断朝向（Sora 契约），有的按 `ratio`，所以比例标签必须落到对应的像素尺寸上，
+ * 不能一律当横屏。
+ *
+ * `1:1` 是生图面板与全局配置的默认档（视频面板写的是像素值 `1024x1024`），视频里按横屏处理，
+ * 保持「没选过尺寸时默认横屏」的既有行为；要方形视频在视频面板直接选「方形」。
+ */
+const VIDEO_SIZE_BY_RATIO: Record<string, string> = {
+    "16:9": "1280x720",
+    "3:2": "1280x720",
+    "4:3": "1280x720",
+    "21:9": "1280x720",
+    "1:1": "1280x720",
+    "9:16": "720x1280",
+    "2:3": "720x1280",
+    "3:4": "720x1280",
+};
+
+export function normalizeVideoSize(value: string) {
+    const raw = (value || "").trim();
+    if (raw === "auto") return null;
+    if (/^\d+x\d+$/.test(raw)) return raw;
+    return VIDEO_SIZE_BY_RATIO[raw] || "1280x720";
+}
+
+/**
+ * 画幅比例：网关的视频渠道从 `ratio` / `aspect_ratio` 取画幅（`size` 只当分辨率用），
+ * 缺画幅时会回落到 16:9，所以这里按像素尺寸算出比例，并吸附到网关公布的挡位。
+ */
+export function videoRatioForSize(size: string | null, spec?: ChannelVideoSpec) {
+    const matched = /^(\d+)x(\d+)$/.exec(size || "");
+    if (!matched) return "";
+    return snapRatioToSpec(simplifyRatio(Number(matched[1]), Number(matched[2])), spec?.aspectRatios);
+}
+
+function simplifyRatio(width: number, height: number) {
+    const gcd = (a: number, b: number): number => (b ? gcd(b, a % b) : a);
+    const divisor = gcd(width, height) || 1;
+    return `${Math.round(width / divisor)}:${Math.round(height / divisor)}`;
+}
+
+/** 吸附到网关公布的画幅挡位（取最接近的一档）；网关没公布时原样发送。 */
+function snapRatioToSpec(ratio: string, published?: string[]) {
+    const options = (published || []).filter((item) => Number.isFinite(ratioValue(item)));
+    if (!options.length) return ratio;
+    const target = ratioValue(ratio);
+    return options.reduce((best, item) => (Math.abs(ratioValue(item) - target) < Math.abs(ratioValue(best) - target) ? item : best), options[0]);
+}
+
+function ratioValue(ratio: string) {
+    const matched = /^(\d+(?:\.\d+)?)\s*[:：]\s*(\d+(?:\.\d+)?)$/.exec((ratio || "").trim());
+    const height = matched ? Number(matched[2]) : 0;
+    return matched && height ? Number(matched[1]) / height : Number.NaN;
 }
 
 function normalizeVideoResolution(value: string) {
