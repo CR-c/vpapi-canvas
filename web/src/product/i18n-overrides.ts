@@ -11,6 +11,10 @@ import { BRAND } from "./brand";
  */
 const overrides: Record<string, Record<string, string>> = {
     "zh-CN": {
+        "product.cost.notice": "本次预计消耗 {{amount}}",
+        "product.cost.noticeByTime": "本次预计消耗 {{amount}}（{{seconds}} 秒 × {{rate}}/秒）",
+        "product.cost.perCall": "{{amount}}/次",
+        "product.cost.perSecond": "{{amount}}/秒",
         "product.connect.title": "接入 vpapi",
         "product.connect.subtitle": "粘贴你的 vpapi API Key，即可开始生图、生视频和用内置助手创作。",
         "product.connect.keyLabel": "API Key",
@@ -102,6 +106,10 @@ const overrides: Record<string, Record<string, string>> = {
         "product.agent.missingVideoModel": "还没有可用的视频模型：请先在设置里给「视频」填一把 Key。",
     },
     "en-US": {
+        "product.cost.notice": "Estimated cost: {{amount}}",
+        "product.cost.noticeByTime": "Estimated cost: {{amount}} ({{seconds}}s × {{rate}}/s)",
+        "product.cost.perCall": "{{amount}}/call",
+        "product.cost.perSecond": "{{amount}}/s",
         "product.connect.title": "Connect vpapi",
         "product.connect.subtitle": "Paste your vpapi API key to start generating images, videos and working with the built-in assistant.",
         "product.connect.keyLabel": "API key",

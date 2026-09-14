@@ -6,6 +6,7 @@ import { applyChannels, buildApiUrl, createModelChannel, useConfigStore, type Ai
 
 import { GATEWAY_URL } from "../brand";
 import { refreshModelEndpoints } from "./model-endpoints";
+import { refreshModelPricing } from "./pricing";
 import { KEY_SLOTS, slotOfChannel, SLOT_CHANNEL_ID, type KeySlot } from "./slots";
 
 const text = (key: string, options?: Record<string, unknown>) => i18n.t(`product.connect.${key}`, options);
@@ -160,8 +161,9 @@ export async function applyGatewayKey(apiKey: string, slot: KeySlot = "text"): P
     const channels = sortSlotChannels([...config.channels.filter((item) => item.id !== channel.id), channel]);
     const next = applyChannels({ ...config, channels }, channels);
     (Object.keys(next) as Array<keyof AiConfig>).forEach((key) => updateConfig(key, next[key]));
-    // 端点能力用于助手挑选对话模型；失败不影响接入本身。
+    // 端点能力用于助手挑选对话模型，价格目录用于生成前提示消耗；失败不影响接入本身。
     await refreshModelEndpoints(apiKey, slot).catch(() => null);
+    await refreshModelPricing(apiKey, slot).catch(() => null);
     return models.length;
 }
 
@@ -204,6 +206,7 @@ export async function reloadGatewayModels(slot?: KeySlot): Promise<number> {
         channels[index] = createGatewayChannel(apiKey, models, item);
         imported += models.length;
         await refreshModelEndpoints(apiKey, item).catch(() => null);
+        await refreshModelPricing(apiKey, item).catch(() => null);
     }
     if (!connected) throw new Error(text("missingKey"));
     updateConfig("channels", sortSlotChannels(channels));

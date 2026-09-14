@@ -4,10 +4,13 @@ import i18n from "@/i18n";
 import { buildApiUrl, capabilityFromEndpointTypes, guessCapability, normalizeChannelModels, resolveModelRequestConfig, resolveModelScript, type AiConfig, type ChannelModel, type ChannelVideoSpec, type ModelChannel } from "@/stores/use-config-store";
 import { normalizePluginImages, runModelPlugin } from "./model-plugin";
 import { nanoid } from "nanoid";
-import { dataUrlToFile } from "@/lib/image-utils";
+import { dataUrlToFile, readImageMeta } from "@/lib/image-utils";
 import { buildImageReferencePromptText } from "@/lib/image-reference-prompt";
 import { imageToDataUrl } from "@/services/image-storage";
 import type { ReferenceImage } from "@/types/image";
+// [vpapi-canvas] fork：生成前按网关价格提示本次消耗。
+import { generationCostNotice } from "@/product/vpapi/pricing";
+import { useProductStore } from "@/product/store";
 
 const apiText = (key: string, options?: Record<string, unknown>) => i18n.t(`apiErrors.${key}`, options);
 
@@ -220,6 +223,70 @@ function resolveRequestSize(quality: string | undefined, size: string) {
     }
     if (value.includes(":")) return resolveSize(quality, value);
     throw new Error(apiText("invalidImageSizeFormat"));
+}
+
+/**
+ * 画幅选「auto」且带参考图（图生图 / 改图）时，按第一张参考图的比例给出显式尺寸，
+ * 让输出与原图比例一致，而不是交给上游碰运气。
+ */
+async function resolveReferenceSize(quality: string | undefined, model: string, references: ReferenceImage[]) {
+    const reference = references[0];
+    if (!reference) return undefined;
+    try {
+        const meta = await readImageMeta(await imageToDataUrl(reference));
+        if (!meta.width || !meta.height) return undefined;
+        const ratio = referenceAspectRatio(meta.width, meta.height);
+        // gpt-image / dall-e 只接受固定几档尺寸，按最接近的一档吸附。
+        if (/gpt-image|dall-e|dalle/i.test(model)) return gptImageSize(ratio);
+        try {
+            return resolveSize(quality, ratio);
+        } catch {
+            // 参考图比例很窄 / 很宽时高画质会超出网关上限，退到最小基准重算一次。
+            try {
+                return resolveSize(undefined, ratio);
+            } catch {
+                return undefined;
+            }
+        }
+    } catch {
+        return undefined;
+    }
+}
+
+/** gpt-image 系列固定尺寸：1024x1024 / 1536x1024 / 1024x1536。 */
+function gptImageSize(ratio: string) {
+    const [width, height] = ratio.split(":").map(Number);
+    if (!width || !height) return undefined;
+    if (width === height) return "1024x1024";
+    return width > height ? "1536x1024" : "1024x1536";
+}
+
+/** 把参考图尺寸化简成宽高比字符串，并把比例钳到网关允许的上限内。 */
+function referenceAspectRatio(width: number, height: number) {
+    const divisor = greatestCommonDivisor(width, height) || 1;
+    let ratioWidth = Math.max(1, Math.round(width / divisor));
+    let ratioHeight = Math.max(1, Math.round(height / divisor));
+    const longest = Math.max(ratioWidth, ratioHeight);
+    const shortest = Math.min(ratioWidth, ratioHeight);
+    if (longest / shortest > IMAGE_MAX_RATIO) {
+        if (ratioWidth >= ratioHeight) ratioHeight = Math.max(1, Math.round(ratioWidth / IMAGE_MAX_RATIO));
+        else ratioWidth = Math.max(1, Math.round(ratioHeight / IMAGE_MAX_RATIO));
+    }
+    return `${ratioWidth}:${ratioHeight}`;
+}
+
+function greatestCommonDivisor(a: number, b: number): number {
+    let left = Math.abs(Math.round(a));
+    let right = Math.abs(Math.round(b));
+    while (right) {
+        [left, right] = [right, left % right];
+    }
+    return left;
+}
+
+/** auto 时跟随参考图比例，其余情况沿用面板里选的尺寸。 */
+async function resolveEditRequestSize(quality: string | undefined, size: string, model: string, references: ReferenceImage[]) {
+    return resolveRequestSize(quality, size) ?? (await resolveReferenceSize(quality, model, references));
 }
 
 function resolveGeminiImageConfig(config: AiConfig) {
@@ -741,6 +808,7 @@ function parseGeminiImagePayload(payload: GeminiPayload) {
 export async function requestGeneration(config: AiConfig, prompt: string, options?: RequestOptions) {
     const requestConfig = resolveModelRequestConfig(config, config.model || config.imageModel);
     const n = Math.max(1, Math.min(15, Math.floor(Math.abs(Number(config.count)) || 1)));
+    notifyModelCost(config.model || config.imageModel, { count: n });
     const script = resolveModelScript(config, config.model || config.imageModel);
     if (script) {
         const quality = normalizeQuality(config.quality);
@@ -798,11 +866,12 @@ export async function requestGeneration(config: AiConfig, prompt: string, option
 export async function requestEdit(config: AiConfig, prompt: string, references: ReferenceImage[], mask?: ReferenceImage, options?: RequestOptions) {
     const requestConfig = resolveModelRequestConfig(config, config.model || config.imageModel);
     const n = Math.max(1, Math.min(15, Math.floor(Math.abs(Number(config.count)) || 1)));
+    notifyModelCost(config.model || config.imageModel, { count: n });
     const requestPrompt = buildImageReferencePromptText(prompt, references);
     const script = resolveModelScript(config, config.model || config.imageModel);
     if (script) {
         const quality = normalizeQuality(config.quality);
-        const requestSize = resolveRequestSize(quality, config.size);
+        const requestSize = await resolveEditRequestSize(quality, config.size, requestConfig.model, references);
         const background = normalizeBackground(config.background);
         const refs = await Promise.all(references.map((image) => imageToDataUrl(image)));
         try {
@@ -830,7 +899,7 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
     }
 
     const quality = normalizeQuality(config.quality);
-    const requestSize = resolveRequestSize(quality, config.size);
+    const requestSize = await resolveEditRequestSize(quality, config.size, requestConfig.model, references);
     const background = normalizeBackground(config.background);
     const formData = new FormData();
     formData.set("model", requestConfig.model);
@@ -1020,3 +1089,9 @@ const defaultGeminiConfig: Pick<AiConfig, "baseUrl" | "apiKey" | "apiFormat" | "
     model: "",
     systemPrompt: "",
 };
+
+/** [vpapi-canvas] fork：按网关价格目录提示本次预计消耗（拿不到价格时静默）。 */
+function notifyModelCost(encodedModel: string, options: { count?: number; seconds?: number }) {
+    const notice = generationCostNotice(encodedModel, options);
+    if (notice) useProductStore.getState().pushNotice(notice);
+}

@@ -52,7 +52,24 @@ export function useProductBootstrap() {
     }, [message, t]);
 }
 
-/** fork 的全局浮层（目前只有接入引导）。 */
+/** fork 的全局浮层（接入引导 + 轻量提示）。 */
 export function ProductOverlays() {
-    return <ConnectGate />;
+    return (
+        <>
+            <ConnectGate />
+            <ProductNotices />
+        </>
+    );
+}
+
+/** 把产品层的提示（如生成前额度提示）交给 antd message 渲染。 */
+export function ProductNotices() {
+    const { message } = App.useApp();
+    const notice = useProductStore((state) => state.notice);
+    useEffect(() => {
+        if (!notice) return;
+        message.info({ content: notice.text, key: notice.id });
+        useProductStore.getState().clearNotice();
+    }, [message, notice]);
+    return null;
 }
