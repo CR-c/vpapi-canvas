@@ -8,6 +8,8 @@ import { useTranslation } from "react-i18next";
 import { requestEdit, requestGeneration, requestImageQuestion } from "@/services/api/image";
 import { requestAudioGeneration, storeGeneratedAudio } from "@/services/api/audio";
 import { requestVideoGeneration, storeGeneratedVideo } from "@/services/api/video";
+// [vpapi-canvas] fork：未完成的视频任务持久化，刷新后继续查询。
+import { rememberVideoTask } from "@/product/video-tasks";
 import { defaultConfig, useConfigStore, useEffectiveConfig } from "@/stores/use-config-store";
 import { uploadImage } from "@/services/image-storage";
 import { uploadMediaFile } from "@/services/file-storage";
@@ -2356,6 +2358,8 @@ function InfiniteCanvasPage() {
                                 signal: controller.signal,
                                 videos: generationContext.referenceVideos,
                                 audios: generationContext.referenceAudios,
+                                // [vpapi-canvas] fork：记录任务，页面刷新后可继续查询结果。
+                                onTask: (task) => void rememberVideoTask({ id: nanoid(), projectId, nodeId: videoId, provider: task.provider, taskId: task.id, model: task.model, createdAt: Date.now() }),
                             }),
                         );
                         const videoSize = fitNodeSize(video.width || spec.width, video.height || spec.height, VIDEO_NODE_MAX_WIDTH, VIDEO_NODE_MAX_HEIGHT);

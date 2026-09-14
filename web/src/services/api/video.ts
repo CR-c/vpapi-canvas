@@ -22,6 +22,10 @@ export const VIDEO_TASK_POLL_INTERVAL = 2500;
 // Some providers (e.g. seedance) take 10+ minutes to render; keep polling for
 // up to 30 minutes so a task is not reported as failed while it is still running.
 export const VIDEO_TASK_TIMEOUT_MS = 30 * 60 * 1000;
+// 30 分钟后任务仍可能在渲染，只是放慢轮询，避免长时间高频查询；
+// 真正放弃要等到 VIDEO_TASK_HARD_TIMEOUT_MS。
+export const VIDEO_TASK_SLOW_POLL_INTERVAL = 30000;
+export const VIDEO_TASK_HARD_TIMEOUT_MS = 2 * 60 * 60 * 1000;
 // A poll that fails for a moment (network flap, gateway restart, rate limit) must
 // not fail a generation the provider is still rendering, so keep retrying for about
 // a minute before reporting the error.
@@ -45,17 +49,25 @@ function aiHeaders(config: AiConfig, contentType?: string) {
     };
 }
 
-type VideoMediaOptions = RequestOptions & { videos?: ReferenceVideo[]; audios?: ReferenceAudio[] };
+type VideoMediaOptions = RequestOptions & {
+    videos?: ReferenceVideo[];
+    audios?: ReferenceAudio[];
+    /** 任务创建后回调，调用方可用它持久化任务 id，页面刷新后继续查询。 */
+    onTask?: (task: VideoGenerationTask) => void;
+};
 
 export async function requestVideoGeneration(config: AiConfig, prompt: string, references: ReferenceImage[] = [], options?: VideoMediaOptions): Promise<VideoGenerationResult> {
     const task = await createVideoGenerationTask(config, prompt, references, options);
-    const deadline = Date.now() + VIDEO_TASK_TIMEOUT_MS;
-    while (Date.now() < deadline) {
+    options?.onTask?.(task);
+    const softDeadline = Date.now() + VIDEO_TASK_TIMEOUT_MS;
+    const hardDeadline = Date.now() + VIDEO_TASK_HARD_TIMEOUT_MS;
+    while (Date.now() < hardDeadline) {
         if (options?.signal?.aborted) throw new DOMException("Aborted", "AbortError");
         const state = await pollVideoGenerationTask(config, task, options);
         if (state.status === "completed") return state.result;
         if (state.status === "failed") throw new Error(state.error);
-        await delay(VIDEO_TASK_POLL_INTERVAL, options?.signal);
+        // 软超时后放慢轮询：网关仍在渲染的任务不判失败。
+        await delay(Date.now() < softDeadline ? VIDEO_TASK_POLL_INTERVAL : VIDEO_TASK_SLOW_POLL_INTERVAL, options?.signal);
     }
     throw new Error(apiText("videoTimeout", { provider: "" }));
 }

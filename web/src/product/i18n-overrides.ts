@@ -15,6 +15,7 @@ const overrides: Record<string, Record<string, string>> = {
         "product.cost.noticeByTime": "本次预计消耗 {{amount}}（{{seconds}} 秒 × {{rate}}/秒）",
         "product.cost.perCall": "{{amount}}/次",
         "product.cost.perSecond": "{{amount}}/秒",
+        "product.videoResume.unsupported": "该任务由模型脚本创建，无法在刷新后继续查询，请重新生成",
         "product.cost.perCallFrom": "{{amount}}/次起",
         "product.cost.perSecondFrom": "{{amount}}/秒起",
         "product.connect.title": "接入 vpapi",
@@ -112,6 +113,7 @@ const overrides: Record<string, Record<string, string>> = {
         "product.cost.noticeByTime": "Estimated cost: {{amount}} ({{seconds}}s × {{rate}}/s)",
         "product.cost.perCall": "{{amount}}/call",
         "product.cost.perSecond": "{{amount}}/s",
+        "product.videoResume.unsupported": "This task was created by a model script and cannot be resumed after a refresh; please regenerate.",
         "product.cost.perCallFrom": "from {{amount}}/call",
         "product.cost.perSecondFrom": "from {{amount}}/s",
         "product.connect.title": "Connect vpapi",
@@ -211,8 +213,14 @@ const overrides: Record<string, Record<string, string>> = {
  * i18next 的 addResourceBundle 不会用扁平 key 覆盖已存在的嵌套值。
  */
 const upstreamOverrides = {
-    "zh-CN": { meta: { title: BRAND.title, description: BRAND.description } },
-    "en-US": { meta: { title: BRAND.titleEn, description: BRAND.descriptionEn } },
+    "zh-CN": {
+        meta: { title: BRAND.title, description: BRAND.description },
+        apiErrors: { videoTimeout: "{{provider}}视频生成超时：任务可能仍在网关后台生成，可稍后在 vpapi 的任务列表查看结果" },
+    },
+    "en-US": {
+        meta: { title: BRAND.titleEn, description: BRAND.descriptionEn },
+        apiErrors: { videoTimeout: "{{provider}} video generation timed out; the task may still be rendering on the gateway — check the vpapi task list later" },
+    },
 };
 
 let applied = false;

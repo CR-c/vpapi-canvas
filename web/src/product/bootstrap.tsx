@@ -7,6 +7,7 @@ import { useProductStore } from "@/product/store";
 import { ConnectGate } from "@/product/ui/connect-gate";
 import { applyGatewayKey } from "@/product/vpapi/client";
 import { useConfigStore } from "@/stores/use-config-store";
+import { useVideoTaskResume } from "./video-resume";
 
 /** 一键接入链接里允许出现的参数；导入后立即从地址栏清除，避免 Key 留在历史记录里。 */
 const CONFIG_PARAM_KEYS = ["apiKey", "apikey", "baseUrl", "baseurl"];
@@ -52,8 +53,10 @@ export function useProductBootstrap() {
     }, [message, t]);
 }
 
-/** fork 的全局浮层（接入引导 + 轻量提示）。 */
+/** fork 的全局浮层（接入引导 + 轻量提示 + 视频任务恢复）。 */
 export function ProductOverlays() {
+    // 刷新后继续查询未完成的视频任务（网关可能还在渲染）。
+    useVideoTaskResume();
     return (
         <>
             <ConnectGate />

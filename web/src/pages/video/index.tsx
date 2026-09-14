@@ -14,7 +14,7 @@ import { canvasThemes } from "@/lib/canvas-theme";
 import { formatBytes, formatDuration } from "@/lib/image-utils";
 import { deleteStoredMedia, resolveMediaUrl } from "@/services/file-storage";
 import { resolveImageUrl, uploadImage } from "@/services/image-storage";
-import { VIDEO_TASK_POLL_INTERVAL, VIDEO_TASK_TIMEOUT_MS, createVideoGenerationTask, pollVideoGenerationTask, storeGeneratedVideo, type VideoGenerationTask } from "@/services/api/video";
+import { VIDEO_TASK_HARD_TIMEOUT_MS, VIDEO_TASK_POLL_INTERVAL, VIDEO_TASK_SLOW_POLL_INTERVAL, VIDEO_TASK_TIMEOUT_MS, createVideoGenerationTask, pollVideoGenerationTask, storeGeneratedVideo, type VideoGenerationTask } from "@/services/api/video";
 import { useAssetStore } from "@/stores/use-asset-store";
 import { useWorkbenchAgentStore } from "@/stores/use-workbench-agent-store";
 import { boolConfig, modelOptionLabel, useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
@@ -313,7 +313,8 @@ export default function VideoPage() {
         setResults((value) => (value.length ? value : [{ id: log.id, status: "pending" }]));
         const taskConfig = buildVideoConfig({ ...effectiveConfig, ...log.config }, log.task.model || log.model);
         try {
-            const deadline = Date.now() + VIDEO_TASK_TIMEOUT_MS;
+            const softDeadline = Date.now() + VIDEO_TASK_TIMEOUT_MS;
+            const deadline = Date.now() + VIDEO_TASK_HARD_TIMEOUT_MS;
             while (Date.now() < deadline) {
                 const state = await pollVideoGenerationTask(configOverride || taskConfig, log.task);
                 if (state.status === "completed") {
@@ -335,7 +336,8 @@ export default function VideoPage() {
                     return;
                 }
                 if (state.status === "failed") throw new Error(state.error);
-                await delay(VIDEO_TASK_POLL_INTERVAL);
+                // 软超时后放慢轮询，长耗时任务继续等结果。
+                await delay(Date.now() < softDeadline ? VIDEO_TASK_POLL_INTERVAL : VIDEO_TASK_SLOW_POLL_INTERVAL);
             }
             throw new Error(t("videoWorkbench.timeout"));
         } catch (error) {
