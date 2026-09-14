@@ -37,7 +37,6 @@ export function QuotaChip() {
     const unlimited = useQuotaStore((state) => state.unlimited);
     const scope = useQuotaStore((state) => state.scope);
     const updatedAt = useQuotaStore((state) => state.updatedAt);
-    const connected = Boolean(apiKey.trim());
 
     useEffect(() => {
         if (!connected) return;
