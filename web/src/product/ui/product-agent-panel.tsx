@@ -135,6 +135,13 @@ export function ProductAgentPanel() {
             )}
 
             <div className="shrink-0">
+                {connected && !agentModels.length ? (
+                    <div className="px-4 pb-2">
+                        <button type="button" className="w-full rounded-lg border px-3 py-2 text-left text-xs leading-5" style={{ borderColor: theme.node.stroke, color: theme.node.text }} onClick={() => openConfigDialog(false, "channels")}>
+                            {t("product.agent.noTextModel")}
+                        </button>
+                    </div>
+                ) : null}
                 {!connected ? (
                     <div className="px-4 pb-2">
                         <button type="button" className="w-full rounded-lg border px-3 py-2 text-sm" style={{ borderColor: theme.node.stroke, color: theme.node.text }} onClick={openConnect}>
@@ -145,6 +152,7 @@ export function ProductAgentPanel() {
                 <AgentChatComposer
                     prompt={prompt}
                     sending={running}
+                    disabled={connected ? !agentModels.length : false}
                     placeholder={t("product.agent.placeholder")}
                     theme={theme}
                     onPromptChange={setPrompt}

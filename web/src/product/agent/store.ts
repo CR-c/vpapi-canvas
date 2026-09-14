@@ -11,7 +11,7 @@ import { useAgentStore, type AgentChatItem, type AgentPendingToolCall } from "@/
 import { PRODUCT_AGENT_PROMPT } from "./prompt";
 import { runAgentTurnWithFallback, type AgentToolCall, type TurnMessage } from "./protocol";
 import { isProductTool, productToolSchemas, runProductTool, WRITE_TOOLS } from "./tools";
-import { isChatModel, isToolsModel, readModelEndpoints } from "@/product/vpapi/model-endpoints";
+import { isToolsModel } from "@/product/vpapi/model-endpoints";
 
 const MAX_STEPS = 8;
 const MAX_TOOL_OUTPUT = 8000;
@@ -130,12 +130,13 @@ export const useProductAgentStore = create<ProductAgentStore>()(
     ),
 );
 
-/** 助手可用的模型：优先取支持对话端点的模型（含被判为图片/视频但同样支持 chat 的模型），支持工具调用的排在前面。 */
+/**
+ * 助手（Agent）的大脑只使用文生模型：生成图片 / 视频由它调用画布工具完成，
+ * 这样模型能力展示与用户预期一致（图片、视频模型不会出现在对话模型列表里）。
+ */
 export function productAgentModels() {
     const { config } = useConfigStore.getState();
-    const map = readModelEndpoints();
-    const chatModels = selectableModelsByCapability(config).filter((value) => isChatModel(value, map));
-    const values = chatModels.length ? chatModels : selectableModelsByCapability(config, "text");
+    const values = selectableModelsByCapability(config, "text");
     const rank = (value: string) => {
         const support = isToolsModel(value);
         return support === true ? 0 : support === undefined ? 1 : 2;

@@ -4,7 +4,7 @@ import { nanoid } from "nanoid";
 import i18n from "@/i18n";
 import { summarizeCanvasAgentOps, type CanvasAgentOp, type CanvasAgentSnapshot } from "@/lib/canvas/canvas-agent-ops";
 import { isSiteTool, SITE_TOOL_NAMES, runSiteTool } from "@/lib/agent/agent-site-tools";
-import { useConfigStore } from "@/stores/use-config-store";
+import { modelOptionName, selectableModelsByCapability, useConfigStore } from "@/stores/use-config-store";
 import type { CanvasNodeData, CanvasNodeMetadata } from "@/types/canvas";
 import type { AgentCanvasContext } from "@/stores/use-agent-store";
 
@@ -200,6 +200,10 @@ function runCanvasGeneration(mode: "image" | "video", input: Record<string, unkn
     const config = useConfigStore.getState().config;
     const prompt = typeof input.prompt === "string" ? input.prompt.trim() : "";
     if (!prompt) throw new Error(i18n.t("product.agent.promptRequired"));
+    const options = selectableModelsByCapability(config, mode);
+    if (!options.length) throw new Error(i18n.t(mode === "image" ? "product.agent.missingImageModel" : "product.agent.missingVideoModel"));
+    const requested = typeof input.model === "string" ? input.model.trim() : "";
+    const model = options.find((value) => value === requested || modelOptionName(value) === requested) || options[0];
     const nodes = canvas.snapshot.nodes;
     const nodeId = `config-${nanoid()}`;
     const text = (key: string) => (typeof input[key] === "string" ? (input[key] as string).trim() : "");
@@ -209,7 +213,7 @@ function runCanvasGeneration(mode: "image" | "video", input: Record<string, unkn
                   generationMode: "image",
                   prompt,
                   composerContent: prompt,
-                  model: text("model") || config.imageModel || config.model,
+                  model,
                   size: text("size") || config.size,
                   count: Math.max(1, Math.floor(Number(input.count) || Number(config.canvasImageCount) || 1)),
                   ...(text("quality") ? { quality: text("quality") } : {}),
@@ -218,7 +222,7 @@ function runCanvasGeneration(mode: "image" | "video", input: Record<string, unkn
                   generationMode: "video",
                   prompt,
                   composerContent: prompt,
-                  model: text("model") || config.videoModel || config.model,
+                  model,
                   size: text("size") || config.size,
                   seconds: text("seconds") || config.videoSeconds,
                   vquality: text("resolution") || config.vquality,

@@ -92,6 +92,9 @@ const overrides: Record<string, Record<string, string>> = {
         "product.agent.noTools": "当前模型不支持工具调用，只能对话；换一个模型可以让它直接改画布。",
         "product.agent.degraded": "本次工具调用没有成功，已按普通对话回答。可重试，或换一个支持工具调用的模型。",
         "product.agent.promptRequired": "请告诉我要生成什么内容",
+        "product.agent.noTextModel": "还没有可用的文生模型：点这里给「文本 / 助手」填一把带对话模型的 Key，生图和视频会由它调度。",
+        "product.agent.missingImageModel": "还没有可用的生图模型：请先在设置里给「生图」填一把 Key。",
+        "product.agent.missingVideoModel": "还没有可用的视频模型：请先在设置里给「视频」填一把 Key。",
     },
     "en-US": {
         "product.connect.title": "Connect vpapi",
@@ -175,6 +178,9 @@ const overrides: Record<string, Record<string, string>> = {
         "product.agent.noTools": "This model has no tool calling, so it can only chat; pick another model to let it edit the canvas.",
         "product.agent.degraded": "Tool calling did not go through this time, so the reply is chat-only. Retry, or switch to a model with tool support.",
         "product.agent.promptRequired": "Tell me what to generate",
+        "product.agent.noTextModel": "No text model available yet: click here to add a key with chat models to the Text / assistant row; image and video generation will be driven through it.",
+        "product.agent.missingImageModel": "No image model available: add a key to the Image row in settings first.",
+        "product.agent.missingVideoModel": "No video model available: add a key to the Video row in settings first.",
     },
 };
 
