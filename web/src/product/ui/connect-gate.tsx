@@ -5,17 +5,17 @@ import { useTranslation } from "react-i18next";
 
 import { LINKS } from "@/product/brand";
 import { useProductStore } from "@/product/store";
-import { applyGatewayKeys, gatewayUrl } from "@/product/vpapi/client";
+import { applyGroupKeys, gatewayUrl } from "@/product/vpapi/client";
 import { useQuotaStore } from "@/product/vpapi/quota-store";
-import { KEY_SLOTS, type KeySlot } from "@/product/vpapi/slots";
+import { KEY_GROUPS, type KeyGroup } from "@/product/vpapi/slots";
 
-const emptyKeys: Record<KeySlot, string> = { text: "", image: "", video: "", audio: "" };
+const emptyKeys: Record<KeyGroup, string> = { text: "", media: "" };
 
 /**
- * 接入引导：按能力填 API Key。
+ * 接入引导：文生与媒体各填一行 Key。
  *
- * vpapi 的令牌按分组暴露不同模型，所以文本 / 生图 / 视频可以分别填不同的 Key；
- * 一把 Key 覆盖多个能力时填在任意一行即可，模型会按网关公布的能力标签自动归类。
+ * vpapi 的令牌按分组暴露不同模型：文生 Key 供助手与文本节点使用，媒体 Key 供图片 / 视频 / 音频使用。
+ * 每组都能接多把 Key（设置页里添加并调整优先级），这里先各接一把即可；只填一行也能用，另一类能力稍后补。
  */
 export function ConnectGate() {
     const { message } = App.useApp();
@@ -27,25 +27,25 @@ export function ConnectGate() {
     const [error, setError] = useState("");
 
     const connect = async () => {
-        if (!KEY_SLOTS.some((slot) => keys[slot].trim())) {
+        if (!KEY_GROUPS.some((group) => keys[group].trim())) {
             setError(t("product.connect.missingKey"));
             return;
         }
         setLoading(true);
         setError("");
         try {
-            const results = await applyGatewayKeys(keys);
+            const results = await applyGroupKeys(keys);
             const failed = results.filter((result) => !result.ok);
             const succeeded = results.filter((result) => result.ok);
             if (!succeeded.length) {
-                setError(failed.map((result) => `${t(`product.keys.${result.slot}`)}：${result.error}`).join("；"));
+                setError(failed.map((result) => `${t(`product.keys.${result.group}`)}：${result.error}`).join("；"));
                 return;
             }
             const count = succeeded.reduce((sum, result) => sum + (result.models || 0), 0);
             setKeys(emptyKeys);
             closeConnect();
             message.success(t("product.connect.connected", { count }));
-            if (failed.length) message.warning(failed.map((result) => `${t(`product.keys.${result.slot}`)}：${result.error}`).join("；"));
+            if (failed.length) message.warning(failed.map((result) => `${t(`product.keys.${result.group}`)}：${result.error}`).join("；"));
             void useQuotaStore.getState().refresh(true);
             if (window.location.pathname === "/") window.location.assign("/canvas");
         } catch (connectError) {
@@ -75,15 +75,17 @@ export function ConnectGate() {
             <div className="space-y-3">
                 <div className="text-sm text-stone-500">{t("product.connect.subtitle")}</div>
                 <div className="space-y-2">
-                    {KEY_SLOTS.map((slot) => (
-                        <div key={slot} className="flex items-center gap-2">
-                            <span className="w-24 shrink-0 text-xs text-stone-500">{t(`product.keys.${slot}`)}</span>
+                    {KEY_GROUPS.map((group) => (
+                        <div key={group} className="space-y-1">
+                            <div className="text-xs text-stone-500">
+                                {t(`product.keys.${group}`)} · {t(`product.keys.${group}Hint`)}
+                            </div>
                             <Input.Password
-                                value={keys[slot]}
-                                name={`vpapi-key-${slot}`}
+                                value={keys[group]}
+                                name={`vpapi-key-${group}`}
                                 autoComplete="new-password"
-                                placeholder={slot === "text" ? t("product.connect.keyPlaceholder") : t("product.keys.optional")}
-                                onChange={(event) => setKeys((current) => ({ ...current, [slot]: event.target.value }))}
+                                placeholder={group === "text" ? t("product.connect.keyPlaceholder") : t("product.keys.optional")}
+                                onChange={(event) => setKeys((current) => ({ ...current, [group]: event.target.value }))}
                                 onPressEnter={() => void connect()}
                             />
                         </div>

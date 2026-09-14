@@ -5,8 +5,10 @@ import type { NavigateFunction } from "react-router-dom";
 
 import i18n from "@/i18n";
 import { localForageStorage } from "@/lib/localforage-storage";
-import { modelOptionLabel, modelOptionName, resolveModelRequestConfig, selectableModelsByCapability, useConfigStore } from "@/stores/use-config-store";
+import { modelOptionName, resolveModelRequestConfig, selectableModelsByCapability, useConfigStore, type AiConfig } from "@/stores/use-config-store";
 import { useAgentStore, type AgentChatItem, type AgentPendingToolCall } from "@/stores/use-agent-store";
+import { modelPickerGroups } from "@/product/vpapi/model-groups";
+import { modelPriceSummary } from "@/product/vpapi/pricing";
 
 import { PRODUCT_AGENT_PROMPT } from "./prompt";
 import { runAgentTurnWithFallback, type AgentToolCall, type TurnMessage } from "./protocol";
@@ -130,18 +132,38 @@ export const useProductAgentStore = create<ProductAgentStore>()(
     ),
 );
 
+export type AgentModelOption = { value: string; label: string };
+export type AgentModelEntry = AgentModelOption | { label: string; options: AgentModelOption[] };
+export type AgentModelChoices = { entries: AgentModelEntry[]; options: AgentModelOption[] };
+
 /**
  * 助手（Agent）的大脑只使用文生模型：生成图片 / 视频由它调用画布工具完成，
  * 这样模型能力展示与用户预期一致（图片、视频模型不会出现在对话模型列表里）。
+ *
+ * 按 Key 分组返回（标题 = 文生 Key 序号 · 掩码），组内已确认支持工具调用的模型排在前面。
  */
-export function productAgentModels() {
+export function productAgentModels(): AgentModelChoices {
     const { config } = useConfigStore.getState();
-    const values = selectableModelsByCapability(config, "text");
     const rank = (value: string) => {
         const support = isToolsModel(value);
         return support === true ? 0 : support === undefined ? 1 : 2;
     };
-    return [...values].sort((a, b) => rank(a) - rank(b)).map((value) => ({ value, label: modelOptionLabel(config, value) }));
+    const entries: AgentModelEntry[] = [];
+    const options: AgentModelOption[] = [];
+    for (const group of modelPickerGroups(config, selectableModelsByCapability(config, "text"))) {
+        const groupOptions = [...group.models].sort((a, b) => rank(a) - rank(b)).map((value) => ({ value, label: agentModelLabel(config, value) }));
+        options.push(...groupOptions);
+        if (group.label) entries.push({ label: group.label, options: groupOptions });
+        else entries.push(...groupOptions);
+    }
+    return { entries, options };
+}
+
+/** 选择器条目：模型名 · 单价（Key 已由分组标题说明，名字才不会被裁切）。 */
+function agentModelLabel(config: AiConfig, value: string) {
+    const name = modelOptionName(value);
+    const price = modelPriceSummary(value);
+    return price ? `${name} · ${price}` : name;
 }
 
 async function runLoop({ thread, request, navigate, signal }: { thread: ProductAgentThread; request: { baseUrl: string; apiKey: string; model: string; modelKey: string }; navigate: NavigateFunction; signal: AbortSignal }) {
@@ -221,7 +243,7 @@ async function executeTool(call: AgentToolCall, navigate: NavigateFunction, sign
 
 function resolveRequest(selected: string) {
     const { config } = useConfigStore.getState();
-    const fallback = productAgentModels()[0]?.value || "";
+    const fallback = productAgentModels().options[0]?.value || "";
     const modelKey = selected || config.textModel || fallback;
     const requestConfig = resolveModelRequestConfig(config, modelKey);
     if (!requestConfig.model || !requestConfig.apiKey.trim()) return null;

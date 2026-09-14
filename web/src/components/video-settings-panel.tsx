@@ -4,7 +4,7 @@ import { useTranslation } from "react-i18next";
 import i18n from "@/i18n";
 import { ImageSettingsTheme } from "@/components/image-settings-panel";
 import { type CanvasTheme } from "@/lib/canvas-theme";
-import { resolveModelVideoSpec, videoSpecResolution, videoSpecSeconds, type AiConfig } from "@/stores/use-config-store";
+import { resolveModelVideoSpec, videoResolutionNumber, videoSpecResolution, videoSpecSeconds, type AiConfig } from "@/stores/use-config-store";
 
 const resolutionOptions = [
     { value: "480", label: "480p" },
@@ -64,7 +64,8 @@ export function VideoSettingsPanel({ config, onConfigChange, theme, showTitle = 
                                 {videoResolutionLabel(value)}
                             </OptionPill>
                         ))}
-                        <ResolutionInput value={resolution} theme={theme} onChange={(value) => onConfigChange("vquality", value)} />
+                        {/* [vpapi-canvas] fork：网关挡位带 p / 4k 后缀，数字输入框只放像素值，否则浏览器会把框清空。 */}
+                        <ResolutionInput value={videoResolutionNumber(resolution)} theme={theme} onChange={(value) => onConfigChange("vquality", value)} />
                     </div>
                 </SettingGroup>
                 <SettingGroup title={t("settingsPanels.video.size")} color={theme.node.muted}>

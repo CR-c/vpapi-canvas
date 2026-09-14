@@ -1,3 +1,4 @@
+import i18n from "@/i18n";
 import { isFunctionCallingUnsupported, isToolsModel, preferredAgentProtocol, rememberToolSupport } from "@/product/vpapi/model-endpoints";
 
 import type { ToolSchema } from "./tools";
@@ -34,7 +35,37 @@ export class AgentHttpError extends Error {
         readonly status: number,
         readonly body: string,
     ) {
-        super(body || `HTTP ${status}`);
+        super(readableErrorBody(body) || `HTTP ${status}`);
+    }
+}
+
+/**
+ * 浏览器根本没拿到响应：网络不通、代理拦截，或网关/Cloudflare 直接挡掉了请求
+ * （这类响应不带跨域头，浏览器只能报 “Failed to fetch”，看不出真实原因）。
+ */
+export class AgentNetworkError extends Error {
+    constructor(
+        readonly url: string,
+        readonly reason: string,
+    ) {
+        super(i18n.t("product.agent.networkFailed", { url, reason }));
+        this.name = "AgentNetworkError";
+    }
+}
+
+/** 网关的错误体大多是 JSON（如 `{"error":{"message":"…"}}`），只把其中的说明文字交给用户。 */
+function readableErrorBody(body: string) {
+    const text = body.trim();
+    if (!text.startsWith("{")) return text;
+    try {
+        const parsed = JSON.parse(text) as { error?: unknown; message?: unknown; msg?: unknown };
+        const nested = parsed.error && typeof parsed.error === "object" ? (parsed.error as { message?: unknown }).message : parsed.error;
+        for (const value of [nested, parsed.message, parsed.msg]) {
+            if (typeof value === "string" && value.trim()) return value.trim();
+        }
+        return text;
+    } catch {
+        return text;
     }
 }
 
@@ -154,12 +185,18 @@ function apiUrl(baseUrl: string, path: string) {
 }
 
 async function postStream(url: string, apiKey: string, body: unknown, signal: AbortSignal) {
-    const response = await fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
-        body: JSON.stringify(body),
-        signal,
-    });
+    let response: Response;
+    try {
+        response = await fetch(url, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+            body: JSON.stringify(body),
+            signal,
+        });
+    } catch (error) {
+        if (signal.aborted || (error instanceof DOMException && error.name === "AbortError")) throw error;
+        throw new AgentNetworkError(url, error instanceof Error ? error.message : String(error));
+    }
     if (!response.ok) throw new AgentHttpError(response.status, await safeText(response));
     if (!response.body) throw new AgentHttpError(response.status, "empty response body");
     return response.body;

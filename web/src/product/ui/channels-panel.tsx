@@ -1,23 +1,17 @@
-import { Alert, App, Button, Input, Tag } from "antd";
-import { RefreshCw, Unplug } from "lucide-react";
+import { App, Button, Input, Tag, Tooltip } from "antd";
+import { ArrowDown, ArrowUp, RefreshCw, Trash2, Unplug } from "lucide-react";
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { LINKS } from "@/product/brand";
-import { applyGatewayKey, cleanupDuplicateKeys, disconnectGateway, duplicateKeySlots, gatewayUrl, reloadGatewayModels } from "@/product/vpapi/client";
+import { addGatewayKey, disconnectGateway, gatewayUrl, moveGatewayKey, reloadGatewayKey, removeGatewayKey, replaceGatewayKey } from "@/product/vpapi/client";
 import { useQuotaStore } from "@/product/vpapi/quota-store";
-import { KEY_SLOTS, SLOT_CHANNEL_ID, type KeySlot } from "@/product/vpapi/slots";
-import { modelOptionName, useConfigStore, type ChannelModel, type ModelCapability } from "@/stores/use-config-store";
+import { channelsOfGroup, connectedChannels, KEY_GROUPS, maskApiKey, type KeyGroup } from "@/product/vpapi/slots";
+import { modelOptionName, useConfigStore, type ChannelModel, type ModelCapability, type ModelChannel } from "@/stores/use-config-store";
 
 import { ExternalLink } from "./connect-gate";
 
 const CAPABILITIES: ModelCapability[] = ["image", "video", "text", "audio"];
-
-function maskKey(key: string) {
-    const value = key.trim();
-    if (value.length <= 8) return value ? "••••" : "";
-    return `${value.slice(0, 6)}••••${value.slice(-4)}`;
-}
 
 function countByCapability(models: ChannelModel[]) {
     return CAPABILITIES.reduce<Record<ModelCapability, number>>(
@@ -27,24 +21,23 @@ function countByCapability(models: ChannelModel[]) {
 }
 
 /**
- * 设置页的 vpapi 面板：按能力槽位管理各自的 API Key。
- * 协议与网关地址不可更改（见 product/flags.ts）。
+ * 设置页的 vpapi 面板：文生 / 媒体两组 Key。
+ * 每组可接多把 Key，组内顺序就是优先级（可上移 / 下移）；协议与网关地址不可更改（见 product/flags.ts）。
  */
 export function ChannelsPanel() {
     const { message, modal } = App.useApp();
     const { t } = useTranslation();
     const config = useConfigStore((state) => state.config);
-    const connected = config.channels.filter((channel) => channel.apiKey.trim());
+    const connected = connectedChannels(config);
     const counts = useMemo(() => countByCapability(config.channels.flatMap((channel) => channel.models)), [config.channels]);
-    const duplicates = useMemo(() => duplicateKeySlots(config), [config]);
 
-    const disconnect = (slot?: KeySlot) => {
+    const disconnect = () => {
         modal.confirm({
-            title: slot ? t("product.channels.disconnectSlot", { slot: t(`product.keys.${slot}`) }) : t("product.channels.disconnect"),
+            title: t("product.channels.disconnect"),
             content: t("product.channels.disconnectConfirm"),
             okButtonProps: { danger: true },
             onOk: () => {
-                disconnectGateway(slot);
+                disconnectGateway();
                 useQuotaStore.setState({ status: "idle", updatedAt: 0, error: "" });
                 message.success(t("product.channels.disconnectedDone"));
             },
@@ -84,31 +77,9 @@ export function ChannelsPanel() {
                 </div>
             </div>
 
-            {duplicates.length ? (
-                <Alert
-                    type="warning"
-                    showIcon
-                    message={t("product.channels.duplicateKeys", { slots: duplicates.map((slot) => t(`product.keys.${slot}`)).join("、") })}
-                    action={
-                        <Button
-                            size="small"
-                            onClick={() => {
-                                const cleared = cleanupDuplicateKeys();
-                                message.success(t("product.channels.duplicateCleared", { count: cleared.length }));
-                                void useQuotaStore.getState().refresh(true);
-                            }}
-                        >
-                            {t("product.channels.duplicateCleanup")}
-                        </Button>
-                    }
-                />
-            ) : null}
-
-            <div className="space-y-2">
-                {KEY_SLOTS.map((slot) => (
-                    <SlotRow key={slot} slot={slot} />
-                ))}
-            </div>
+            {KEY_GROUPS.map((group) => (
+                <KeyGroupSection key={group} group={group} />
+            ))}
 
             <div className="flex items-center justify-between gap-3">
                 <div className="text-xs text-stone-500">{t("product.channels.lockedHint")}</div>
@@ -122,42 +93,77 @@ export function ChannelsPanel() {
     );
 }
 
-function SlotRow({ slot }: { slot: KeySlot }) {
+function KeyGroupSection({ group }: { group: KeyGroup }) {
     const { message } = App.useApp();
     const { t } = useTranslation();
-    const channel = useConfigStore((state) => state.config.channels.find((item) => item.id === SLOT_CHANNEL_ID[slot]));
+    const config = useConfigStore((state) => state.config);
+    const channels = channelsOfGroup(config, group).filter((channel) => channel.apiKey.trim());
     const [apiKey, setApiKey] = useState("");
-    const [busy, setBusy] = useState<"connect" | "reload" | "">("");
-    const [editing, setEditing] = useState(false);
-    const models = channel?.models || [];
-    const counts = useMemo(() => countByCapability(models), [models]);
-    const isConnected = Boolean(channel?.apiKey.trim());
-    const showInput = !isConnected || editing;
+    const [adding, setAdding] = useState(false);
 
-    const connect = async () => {
+    const add = async () => {
         const key = apiKey.trim();
         if (!key) {
             message.error(t("product.connect.missingKey"));
             return;
         }
-        setBusy("connect");
+        setAdding(true);
         try {
-            const count = await applyGatewayKey(key, slot);
+            const count = await addGatewayKey(key, group);
             setApiKey("");
-            setEditing(false);
             message.success(t("product.connect.connected", { count }));
             void useQuotaStore.getState().refresh(true);
         } catch (error) {
             message.error(error instanceof Error ? error.message : String(error));
         } finally {
-            setBusy("");
+            setAdding(false);
         }
     };
+
+    return (
+        <div className="rounded-lg border border-stone-200 px-4 py-3 dark:border-stone-800">
+            <div className="flex flex-wrap items-center gap-2 text-sm">
+                <span className="font-medium">{t(`product.keys.${group}`)}</span>
+                <span className="text-xs text-stone-500">{t(`product.keys.${group}Hint`)}</span>
+                <Tag>{t("product.channels.keyCount", { count: channels.length })}</Tag>
+            </div>
+            <div className="mt-2 space-y-2">
+                {channels.length ? (
+                    channels.map((channel, index) => <KeyRow key={channel.id} channel={channel} priority={index + 1} total={channels.length} />)
+                ) : (
+                    <div className="text-xs text-stone-500">{t("product.channels.emptyGroup")}</div>
+                )}
+                <div className="flex flex-wrap items-center gap-2">
+                    <Input.Password
+                        className="max-w-[280px]"
+                        value={apiKey}
+                        name={`vpapi-key-${group}-new`}
+                        autoComplete="new-password"
+                        placeholder={t("product.channels.keyPlaceholder")}
+                        onChange={(event) => setApiKey(event.target.value)}
+                        onPressEnter={() => void add()}
+                    />
+                    <Button size="small" type="primary" loading={adding} onClick={() => void add()}>
+                        {t("product.channels.addKey")}
+                    </Button>
+                </div>
+            </div>
+        </div>
+    );
+}
+
+function KeyRow({ channel, priority, total }: { channel: ModelChannel; priority: number; total: number }) {
+    const { message, modal } = App.useApp();
+    const { t } = useTranslation();
+    const [editing, setEditing] = useState(false);
+    const [nextKey, setNextKey] = useState("");
+    const [busy, setBusy] = useState<"reload" | "replace" | "">("");
+    const counts = useMemo(() => countByCapability(channel.models), [channel.models]);
 
     const reload = async () => {
         setBusy("reload");
         try {
-            const count = await reloadGatewayModels(slot);
+            const count = await reloadGatewayKey(channel.id);
             message.success(t("product.channels.reconnectDone", { count }));
         } catch (error) {
             message.error(error instanceof Error ? error.message : String(error));
@@ -166,51 +172,82 @@ function SlotRow({ slot }: { slot: KeySlot }) {
         }
     };
 
+    const replace = async () => {
+        setBusy("replace");
+        try {
+            const count = await replaceGatewayKey(channel.id, nextKey);
+            setNextKey("");
+            setEditing(false);
+            message.success(t("product.channels.reconnectDone", { count }));
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : String(error));
+        } finally {
+            setBusy("");
+        }
+    };
+
+    const remove = () => {
+        modal.confirm({
+            title: t("product.channels.deleteKey"),
+            content: t("product.channels.deleteConfirm", { key: maskApiKey(channel.apiKey) }),
+            okButtonProps: { danger: true },
+            onOk: () => {
+                removeGatewayKey(channel.id);
+                useQuotaStore.setState({ status: "idle", updatedAt: 0, error: "" });
+                message.success(t("product.channels.deleteDone"));
+            },
+        });
+    };
+
     return (
-        <div className="rounded-lg border border-stone-200 px-4 py-3 dark:border-stone-800">
+        <div className="rounded-md border border-stone-200 px-3 py-2 dark:border-stone-800">
             <div className="flex flex-wrap items-center justify-between gap-2">
-                <div className="flex items-center gap-2 text-sm">
-                    <span className="font-medium">{t(`product.keys.${slot}`)}</span>
-                    <Tag color={isConnected ? "green" : "default"}>{t(isConnected ? "product.channels.connected" : "product.channels.disconnected")}</Tag>
-                    {isConnected ? (
-                        <span className="text-xs text-stone-500">{t("product.channels.modelSummary", { image: counts.image, video: counts.video, text: counts.text, audio: counts.audio })}</span>
-                    ) : null}
+                <div className="flex items-center gap-2 text-xs">
+                    <span className="inline-flex size-5 shrink-0 items-center justify-center rounded bg-stone-100 text-xs dark:bg-stone-800">{priority}</span>
+                    <span className="text-stone-500">{maskApiKey(channel.apiKey)}</span>
+                    <span className="text-stone-500">{t("product.channels.modelSummary", { image: counts.image, video: counts.video, text: counts.text, audio: counts.audio })}</span>
                 </div>
-                {!showInput ? (
-                    <div className="flex items-center gap-2">
-                        <span className="text-xs text-stone-500">{maskKey(channel?.apiKey || "")}</span>
-                        <Button size="small" onClick={() => setEditing(true)}>
-                            {t("product.channels.changeKey")}
-                        </Button>
-                        <Button size="small" icon={<RefreshCw className="size-3.5" />} loading={busy === "reload"} onClick={() => void reload()}>
-                            {t("product.channels.reconnect")}
-                        </Button>
-                        <Button size="small" danger icon={<Unplug className="size-3.5" />} onClick={() => disconnectGateway(slot)}>
-                            {t("product.channels.disconnect")}
-                        </Button>
-                    </div>
-                ) : (
-                    <div className="flex min-w-[280px] flex-1 items-center justify-end gap-2">
-                        <Input.Password
-                            className="max-w-[280px]"
-                            value={apiKey}
-                            name={`vpapi-key-${slot}`}
-                            autoComplete="new-password"
-                            placeholder={t("product.channels.keyPlaceholder")}
-                            onChange={(event) => setApiKey(event.target.value)}
-                            onPressEnter={() => void connect()}
-                        />
-                        <Button size="small" type="primary" loading={busy === "connect"} onClick={() => void connect()}>
-                            {t("product.channels.save")}
-                        </Button>
-                        {isConnected ? (
-                            <Button size="small" onClick={() => { setEditing(false); setApiKey(""); }}>
-                                {t("common.cancel")}
-                            </Button>
-                        ) : null}
-                    </div>
-                )}
+                <div className="flex items-center gap-1">
+                    <Tooltip title={t("product.channels.moveUp")}>
+                        <Button size="small" type="text" icon={<ArrowUp className="size-3.5" />} disabled={priority === 1} onClick={() => moveGatewayKey(channel.id, -1)} />
+                    </Tooltip>
+                    <Tooltip title={t("product.channels.moveDown")}>
+                        <Button size="small" type="text" icon={<ArrowDown className="size-3.5" />} disabled={priority === total} onClick={() => moveGatewayKey(channel.id, 1)} />
+                    </Tooltip>
+                    <Button size="small" icon={<RefreshCw className="size-3.5" />} loading={busy === "reload"} onClick={() => void reload()}>
+                        {t("product.channels.reconnect")}
+                    </Button>
+                    <Button size="small" onClick={() => setEditing(true)}>
+                        {t("product.channels.changeKey")}
+                    </Button>
+                    <Button size="small" danger icon={<Trash2 className="size-3.5" />} onClick={remove} />
+                </div>
             </div>
+            {editing ? (
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                    <Input.Password
+                        className="max-w-[280px]"
+                        value={nextKey}
+                        name={`vpapi-key-replace-${channel.id}`}
+                        autoComplete="new-password"
+                        placeholder={t("product.channels.keyPlaceholder")}
+                        onChange={(event) => setNextKey(event.target.value)}
+                        onPressEnter={() => void replace()}
+                    />
+                    <Button size="small" type="primary" loading={busy === "replace"} onClick={() => void replace()}>
+                        {t("product.channels.save")}
+                    </Button>
+                    <Button
+                        size="small"
+                        onClick={() => {
+                            setEditing(false);
+                            setNextKey("");
+                        }}
+                    >
+                        {t("common.cancel")}
+                    </Button>
+                </div>
+            ) : null}
         </div>
     );
 }

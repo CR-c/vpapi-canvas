@@ -7,7 +7,7 @@ import { applyChannels, buildApiUrl, createModelChannel, useConfigStore, type Ai
 import { GATEWAY_URL } from "../brand";
 import { refreshModelEndpoints } from "./model-endpoints";
 import { refreshModelPricing } from "./pricing";
-import { KEY_SLOTS, slotOfChannel, SLOT_CHANNEL_ID, type KeySlot } from "./slots";
+import { channelsOfGroup, channelPriority, createGroupChannelId, groupChannelName, groupOfChannel, KEY_GROUPS, sortGroupChannels, type KeyGroup } from "./slots";
 
 const text = (key: string, options?: Record<string, unknown>) => i18n.t(`product.connect.${key}`, options);
 
@@ -16,13 +16,22 @@ export function gatewayUrl(config?: Pick<AiConfig, "baseUrl">) {
     return config?.baseUrl?.trim() || GATEWAY_URL;
 }
 
-export function createGatewayChannel(apiKey: string, models: ChannelModel[] = [], slot: KeySlot = "text"): ModelChannel {
-    return createModelChannel({ id: SLOT_CHANNEL_ID[slot], name: `vpapi · ${slot}`, baseUrl: GATEWAY_URL, apiFormat: "vpapi", apiKey: apiKey.trim(), models });
+/** 新建一把 Key 的渠道；id 默认按组生成随机后缀并保持不变，同组多把 Key 因此能各自区分模型来源。 */
+export function createGatewayChannel(group: KeyGroup, apiKey: string, models: ChannelModel[] = [], id = createGroupChannelId(group)): ModelChannel {
+    return createModelChannel({ id, name: groupChannelName(group, apiKey), baseUrl: GATEWAY_URL, apiFormat: "vpapi", apiKey: apiKey.trim(), models });
 }
 
-/** 按槽位顺序排列渠道，保证 applyChannels / 默认模型的第一顺位稳定。 */
-function sortSlotChannels(channels: ModelChannel[]) {
-    return [...channels].sort((a, b) => KEY_SLOTS.indexOf(slotOfChannel(a.id) || "text") - KEY_SLOTS.indexOf(slotOfChannel(b.id) || "text"));
+/** 参与提交的渠道：产品分组里真正接了 Key 或已有模型的渠道（占位空渠道不进配置）。 */
+function liveChannels(config: AiConfig) {
+    return config.channels.filter((channel) => groupOfChannel(channel.id) && (channel.apiKey.trim() || channel.models.length));
+}
+
+/** 把渠道列表写回配置：`applyChannels` 重算模型与默认模型，再逐字段更新（会经过 lockProductConfig）。 */
+function commitChannels(config: AiConfig, channels: ModelChannel[]) {
+    const sorted = sortGroupChannels(channels);
+    const next = applyChannels({ ...config, channels: sorted }, sorted);
+    const { updateConfig } = useConfigStore.getState();
+    (Object.keys(next) as Array<keyof AiConfig>).forEach((key) => updateConfig(key, next[key]));
 }
 
 /**
@@ -31,7 +40,7 @@ function sortSlotChannels(channels: ModelChannel[]) {
  */
 export async function connectGateway(apiKey: string): Promise<ChannelModel[]> {
     const key = apiKey.trim();
-    const channel = createGatewayChannel(key);
+    const channel = createGatewayChannel("text", key);
     try {
         const models = await fetchChannelModels(channel);
         if (!models.length) throw new Error(text("empty"));
@@ -139,121 +148,113 @@ async function probeGateway(apiKey: string): Promise<string | null> {
     }
 }
 
-/** 某把 Key 已经接在哪个槽位（同一把 Key 只接一个槽位，模型会自动按能力归类）。 */
-export function slotOfExistingKey(config: AiConfig, apiKey: string): KeySlot | undefined {
+/** 该 Key 已经接在哪一组第几把（同一把 Key 只接一次）。 */
+export function keyLocation(config: AiConfig, apiKey: string) {
     const key = apiKey.trim();
-    if (!key) return undefined;
-    for (const channel of config.channels) {
-        if (channel.apiKey.trim() !== key) continue;
-        const slot = slotOfChannel(channel.id);
-        if (slot) return slot;
-    }
-    return undefined;
+    if (!key) return null;
+    const channel = config.channels.find((item) => item.apiKey.trim() === key && groupOfChannel(item.id));
+    if (!channel) return null;
+    return { channelId: channel.id, group: groupOfChannel(channel.id) as KeyGroup, priority: channelPriority(config, channel.id) };
 }
 
-/** 用一把 Key 接入某个能力槽位：读取模型目录并写入配置（配置写入会经过 lockProductConfig）。 */
-export async function applyGatewayKey(apiKey: string, slot: KeySlot = "text"): Promise<number> {
-    const { config, updateConfig } = useConfigStore.getState();
-    const duplicate = slotOfExistingKey(config, apiKey);
-    if (duplicate && duplicate !== slot) throw new Error(i18n.t("product.keys.duplicate", { slot: i18n.t(`product.keys.${duplicate}`) }));
-    const models = await connectGateway(apiKey);
-    const channel = createGatewayChannel(apiKey, models, slot);
-    const channels = sortSlotChannels([...config.channels.filter((item) => item.id !== channel.id), channel]);
-    const next = applyChannels({ ...config, channels }, channels);
-    (Object.keys(next) as Array<keyof AiConfig>).forEach((key) => updateConfig(key, next[key]));
+function duplicateKeyError(config: AiConfig, apiKey: string) {
+    const location = keyLocation(config, apiKey);
+    if (!location) return null;
+    return i18n.t("product.keys.duplicate", { group: i18n.t(`product.keys.${location.group}`), priority: location.priority });
+}
+
+/** 接一把新 Key 到某组末尾（优先级最低）。 */
+export async function addGatewayKey(apiKey: string, group: KeyGroup): Promise<number> {
+    const { config } = useConfigStore.getState();
+    const key = apiKey.trim();
+    const duplicate = duplicateKeyError(config, key);
+    if (duplicate) throw new Error(duplicate);
+    const models = await connectGateway(key);
+    const channel = createGatewayChannel(group, key, models);
+    commitChannels(config, [...liveChannels(config), channel]);
     // 端点能力用于助手挑选对话模型，价格目录用于生成前提示消耗；失败不影响接入本身。
-    await refreshModelEndpoints(apiKey, slot).catch(() => null);
-    await refreshModelPricing(apiKey, slot).catch(() => null);
+    await refreshModelEndpoints(key, channel.id).catch(() => null);
+    await refreshModelPricing(key, channel.id).catch(() => null);
     return models.length;
 }
 
-export type SlotConnectResult = { slot: KeySlot; ok: boolean; models?: number; error?: string };
+export type GroupConnectResult = { group: KeyGroup; ok: boolean; models?: number; error?: string };
 
-/** 一次接入多个槽位的 Key（留空的跳过）；同一把 Key 只接第一个填写的槽位，某个槽位失败不影响其它槽位。 */
-export async function applyGatewayKeys(keys: Partial<Record<KeySlot, string>>): Promise<SlotConnectResult[]> {
-    const results: SlotConnectResult[] = [];
+/** 首启引导：每组最多接一把 Key（留空的跳过），某一组失败不影响另一组。 */
+export async function applyGroupKeys(keys: Partial<Record<KeyGroup, string>>): Promise<GroupConnectResult[]> {
+    const results: GroupConnectResult[] = [];
     const seen = new Set<string>();
-    for (const slot of KEY_SLOTS) {
-        const apiKey = (keys[slot] || "").trim();
+    for (const group of KEY_GROUPS) {
+        const apiKey = (keys[group] || "").trim();
         if (!apiKey) continue;
         if (seen.has(apiKey)) {
-            results.push({ slot, ok: false, error: i18n.t("product.keys.duplicateInForm") });
+            results.push({ group, ok: false, error: i18n.t("product.keys.duplicateInForm") });
             continue;
         }
         seen.add(apiKey);
         try {
-            results.push({ slot, ok: true, models: await applyGatewayKey(apiKey, slot) });
+            results.push({ group, ok: true, models: await addGatewayKey(apiKey, group) });
         } catch (error) {
-            results.push({ slot, ok: false, error: error instanceof Error ? error.message : String(error) });
+            results.push({ group, ok: false, error: error instanceof Error ? error.message : String(error) });
         }
     }
     return results;
 }
 
-/** 重新读取某个槽位（或全部槽位）的模型目录。 */
-export async function reloadGatewayModels(slot?: KeySlot): Promise<number> {
-    const { config, updateConfig } = useConfigStore.getState();
-    const targets = slot ? [slot] : KEY_SLOTS;
-    const channels = [...config.channels];
-    let imported = 0;
-    let connected = 0;
-    for (const item of targets) {
-        const index = channels.findIndex((channel) => channel.id === SLOT_CHANNEL_ID[item]);
-        const apiKey = channels[index]?.apiKey?.trim();
-        if (index < 0 || !apiKey) continue;
-        connected += 1;
-        const models = await connectGateway(apiKey);
-        channels[index] = createGatewayChannel(apiKey, models, item);
-        imported += models.length;
-        await refreshModelEndpoints(apiKey, item).catch(() => null);
-        await refreshModelPricing(apiKey, item).catch(() => null);
-    }
-    if (!connected) throw new Error(text("missingKey"));
-    updateConfig("channels", sortSlotChannels(channels));
-    return imported;
+/** 重新读取某把 Key 的模型目录；渠道 id 与优先级保持不变。 */
+export async function reloadGatewayKey(channelId: string): Promise<number> {
+    const { config } = useConfigStore.getState();
+    const group = groupOfChannel(channelId);
+    const channel = config.channels.find((item) => item.id === channelId);
+    const apiKey = channel?.apiKey.trim();
+    if (!group || !channel || !apiKey) throw new Error(text("missingKey"));
+    const models = await connectGateway(apiKey);
+    commitChannels(config, liveChannels(config).map((item) => (item.id === channelId ? createGatewayChannel(group, apiKey, models, channelId) : item)));
+    await refreshModelEndpoints(apiKey, channelId).catch(() => null);
+    await refreshModelPricing(apiKey, channelId).catch(() => null);
+    return models.length;
 }
 
-/** 断开某个槽位（或全部槽位）：清空本地保存的 Key 与模型列表，保留其它偏好。 */
-export function disconnectGateway(slot?: KeySlot) {
-    const { config, updateConfig } = useConfigStore.getState();
-    const targets = slot ? [slot] : KEY_SLOTS;
-    const channels = config.channels.map((channel) => {
-        const channelSlot = slotOfChannel(channel.id);
-        return channelSlot && targets.includes(channelSlot) ? createGatewayChannel("", [], channelSlot) : channel;
-    });
-    updateConfig("channels", sortSlotChannels(channels));
+/** 更换某把 Key：保留渠道 id 与优先级，用新 Key 重新读取模型。 */
+export async function replaceGatewayKey(channelId: string, apiKey: string): Promise<number> {
+    const { config } = useConfigStore.getState();
+    const group = groupOfChannel(channelId);
+    const channel = config.channels.find((item) => item.id === channelId);
+    if (!group || !channel) throw new Error(text("missingKey"));
+    const key = apiKey.trim();
+    if (!key) throw new Error(text("missingKey"));
+    if (key === channel.apiKey.trim()) return reloadGatewayKey(channelId);
+    const duplicate = duplicateKeyError(config, key);
+    if (duplicate) throw new Error(duplicate);
+    const models = await connectGateway(key);
+    commitChannels(config, liveChannels(config).map((item) => (item.id === channelId ? createGatewayChannel(group, key, models, channelId) : item)));
+    await refreshModelEndpoints(key, channelId).catch(() => null);
+    await refreshModelPricing(key, channelId).catch(() => null);
+    return models.length;
 }
 
-/** 同一把 Key 出现在多个槽位的槽位列表（正常只应出现在一个槽位）。 */
-export function duplicateKeySlots(config: AiConfig): KeySlot[] {
-    const seen = new Set<string>();
-    const duplicates: KeySlot[] = [];
-    for (const channel of config.channels) {
-        const slot = slotOfChannel(channel.id);
-        const key = channel.apiKey.trim();
-        if (!slot || !key) continue;
-        if (seen.has(key)) duplicates.push(slot);
-        else seen.add(key);
-    }
-    return duplicates;
+/** 调整优先级：与相邻的同组 Key 交换顺序（顺序即优先级的唯一来源）。 */
+export function moveGatewayKey(channelId: string, direction: -1 | 1) {
+    const { config } = useConfigStore.getState();
+    const group = groupOfChannel(channelId);
+    if (!group) return;
+    const groupChannels = channelsOfGroup(config, group).filter((channel) => channel.apiKey.trim());
+    const index = groupChannels.findIndex((channel) => channel.id === channelId);
+    const target = index + direction;
+    if (index < 0 || target < 0 || target >= groupChannels.length) return;
+    const reordered = [...groupChannels];
+    [reordered[index], reordered[target]] = [reordered[target], reordered[index]];
+    commitChannels(config, [...liveChannels(config).filter((channel) => groupOfChannel(channel.id) !== group), ...reordered]);
 }
 
-/** 清理重复的 Key：同一把 Key 只保留第一个槽位，返回被清掉的槽位。 */
-export function cleanupDuplicateKeys(): KeySlot[] {
-    const { config, updateConfig } = useConfigStore.getState();
-    const seen = new Set<string>();
-    const cleared: KeySlot[] = [];
-    const channels = config.channels.map((channel) => {
-        const slot = slotOfChannel(channel.id);
-        const key = channel.apiKey.trim();
-        if (!slot || !key) return channel;
-        if (!seen.has(key)) {
-            seen.add(key);
-            return channel;
-        }
-        cleared.push(slot);
-        return createGatewayChannel("", [], slot);
-    });
-    if (cleared.length) updateConfig("channels", sortSlotChannels(channels));
-    return cleared;
+/** 删除某把 Key：它带来的模型同时从选择器里消失。 */
+export function removeGatewayKey(channelId: string) {
+    const { config } = useConfigStore.getState();
+    commitChannels(config, liveChannels(config).filter((channel) => channel.id !== channelId));
+}
+
+/** 断开接入：清空本地保存的 Key 与模型，保留其它偏好。 */
+export function disconnectGateway() {
+    const { config } = useConfigStore.getState();
+    commitChannels(config, []);
 }

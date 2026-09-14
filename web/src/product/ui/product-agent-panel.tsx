@@ -11,7 +11,7 @@ import { productAgentModels, useProductAgentStore } from "@/product/agent/store"
 import { PRODUCT_FLAGS } from "@/product/flags";
 import { useProductStore } from "@/product/store";
 import { readModelEndpoints, refreshModelEndpoints, isToolsModel } from "@/product/vpapi/model-endpoints";
-import { slotOfChannel } from "@/product/vpapi/slots";
+import { hasGatewayKey } from "@/product/vpapi/slots";
 import { useAgentStore } from "@/stores/use-agent-store";
 import { useConfigStore } from "@/stores/use-config-store";
 import { useThemeStore } from "@/stores/use-theme-store";
@@ -33,9 +33,9 @@ export function ProductAgentPanel() {
     const threads = useProductAgentStore((state) => state.threads);
     const messages = useAgentStore((state) => state.messages);
     const canvasReady = Boolean(useAgentStore((state) => state.canvasContext));
-    const connected = Boolean(config.apiKey.trim());
+    const connected = hasGatewayKey(config);
     const [agentModels, setAgentModels] = useState(() => productAgentModels());
-    const currentModel = model || config.textModel || agentModels[0]?.value || "";
+    const currentModel = model || config.textModel || agentModels.options[0]?.value || "";
 
     // 端点能力缓存用于挑选支持对话的模型；缺失时按每个已接入的 Key 补一次并刷新列表。
     useEffect(() => {
@@ -50,7 +50,7 @@ export function ProductAgentPanel() {
         }
         void Promise.all(
             pending.map((channel) =>
-                refreshModelEndpoints(channel.apiKey, slotOfChannel(channel.id) || "text").catch(() => null),
+                refreshModelEndpoints(channel.apiKey, channel.id).catch(() => null),
             ),
         ).then(() => setAgentModels(productAgentModels()));
     }, [connected, config.channels]);
@@ -135,7 +135,7 @@ export function ProductAgentPanel() {
             )}
 
             <div className="shrink-0">
-                {connected && !agentModels.length ? (
+                {connected && !agentModels.options.length ? (
                     <div className="px-4 pb-2">
                         <button type="button" className="w-full rounded-lg border px-3 py-2 text-left text-xs leading-5" style={{ borderColor: theme.node.stroke, color: theme.node.text }} onClick={() => openConfigDialog(false, "channels")}>
                             {t("product.agent.noTextModel")}
@@ -152,7 +152,7 @@ export function ProductAgentPanel() {
                 <AgentChatComposer
                     prompt={prompt}
                     sending={running}
-                    disabled={connected ? !agentModels.length : false}
+                    disabled={connected ? !agentModels.options.length : false}
                     placeholder={t("product.agent.placeholder")}
                     theme={theme}
                     onPromptChange={setPrompt}
@@ -168,8 +168,9 @@ export function ProductAgentPanel() {
                                 className="max-w-56"
                                 value={currentModel || undefined}
                                 placeholder={t("product.agent.modelRequired")}
-                                options={agentModels}
+                                options={agentModels.entries}
                                 popupMatchSelectWidth={false}
+                                styles={{ popup: { root: { maxWidth: 360 } } }}
                                 onChange={(value) => useProductAgentStore.getState().setModel(value)}
                             />
                             <IconButton theme={theme} label={t("navigation.config")} onClick={() => openConfigDialog(false, "preferences")}>

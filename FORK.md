@@ -28,7 +28,7 @@ fork 的第一目标是「既要专用，又要随时能合上游」——上游
 
 | 上游文件 | 改动 | 原因 |
 | --- | --- | --- |
-| `web/src/stores/use-config-store.ts` | 默认配置、`merge`、协议规范化统一过 `lockProductConfig()` | 锁定 vpapi 协议与官方网关地址 |
+| `web/src/stores/use-config-store.ts` | 默认配置、`merge`、协议规范化统一过 `lockProductConfig()`；接入渠道按「文生 / 媒体」两组归一化（组内顺序即优先级）；默认模型按能力校验；视频分辨率挡位吸附规则 | 锁定 vpapi 协议与官方网关地址；网关能力标签是模型分类的唯一来源，网关没公布的挡位按用户手填发送 |
 | `web/src/components/layout/client-root-init.tsx` | 挂载 `useProductBootstrap()` 与产品浮层 | 首启引导、`?apiKey=` 一键接入、品牌文案注入、生成消耗提示 |
 | `web/src/components/layout/app-config-modal.tsx` | 渠道页渲染 `ProductChannelsPanel` | 替换渠道管理 / 协议下拉 / 模型脚本入口 |
 | `web/src/components/layout/app-top-nav.tsx` | 插入 `QuotaChip` | 展示 Key 剩余额度 |
@@ -36,6 +36,8 @@ fork 的第一目标是「既要专用，又要随时能合上游」——上游
 | `web/src/components/layout/github-link.tsx`、`web/src/hooks/use-version-check.ts` | 指向 fork 仓库 / 关闭上游更新检查 | 品牌与更新源 |
 | `web/index.html`、`web/public/logo.svg` | 站点标题、图标 | 品牌 |
 | `web/src/services/api/video.ts` | `metadata.url` 结果链接、瞬时错误重试、取回降级链 | 生成结果可靠性（上游未含） |
+| `web/src/components/video-settings-panel.tsx` | 分辨率输入框按像素值展示当前挡位 | 网关挡位带 `p` / `4k` 后缀，数字输入框无法解析会显示为空 |
+| `web/src/components/model-picker.tsx` | 选项按接入 Key 分组渲染，条目改为「模型名 + 单价」两行排版并加宽弹层 | 模型名 + 价格拼在一行时过长，弹层里经常被裁切遮挡；分组后才能先看到 Key 再选模型 |
 
 除此之外的上游文件应保持原样。发现需要新补丁点时，先在本表登记再改。
 

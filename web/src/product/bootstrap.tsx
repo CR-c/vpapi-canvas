@@ -5,7 +5,8 @@ import { useTranslation } from "react-i18next";
 import { applyProductI18nOverrides } from "@/product/i18n-overrides";
 import { useProductStore } from "@/product/store";
 import { ConnectGate } from "@/product/ui/connect-gate";
-import { applyGatewayKey } from "@/product/vpapi/client";
+import { addGatewayKey } from "@/product/vpapi/client";
+import { hasGatewayKey } from "@/product/vpapi/slots";
 import { useConfigStore } from "@/stores/use-config-store";
 import { useVideoTaskResume } from "./video-resume";
 
@@ -39,7 +40,8 @@ export function useProductBootstrap() {
             }
             void (async () => {
                 try {
-                    const count = await applyGatewayKey(apiKey);
+                    // 一键接入的 Key 默认当作文生 Key（第一把），媒体 Key 可在引导 / 设置里补。
+                    const count = await addGatewayKey(apiKey, "text");
                     message.success(t("product.connect.connected", { count }));
                 } catch (error) {
                     message.error(error instanceof Error ? error.message : String(error));
@@ -49,7 +51,7 @@ export function useProductBootstrap() {
             return;
         }
 
-        if (!useConfigStore.getState().config.apiKey.trim()) useProductStore.getState().openConnect();
+        if (!hasGatewayKey(useConfigStore.getState().config)) useProductStore.getState().openConnect();
     }, [message, t]);
 }
 

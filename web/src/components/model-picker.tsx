@@ -3,9 +3,12 @@ import { Cpu } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import i18n from "@/i18n";
-import { Select, SelectContent, SelectItem, SelectTrigger } from "@/components/ui/select";
+import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import { modelOptionLabel, modelOptionName, selectableModelsByCapability, type AiConfig, type ModelCapability } from "@/stores/use-config-store";
+// [vpapi-canvas] fork：选项按 Key 分组，条目改成「模型名 + 单价」两行排版。
+import { modelPickerGroups } from "@/product/vpapi/model-groups";
+import { modelPriceSummary } from "@/product/vpapi/pricing";
 
 type ModelPickerProps = {
     config: AiConfig;
@@ -23,6 +26,8 @@ export function ModelPicker({ config, value, onChange, capability, className, fu
     const pickerId = useId();
     const [open, setOpen] = useState(false);
     const options = useMemo(() => Array.from(new Set([...(config.channelMode === "local" && !capability ? [value] : []), ...selectableModelsByCapability(config, capability)].filter((model): model is string => Boolean(model)))), [capability, config, value]);
+    // [vpapi-canvas] fork：按 Key（渠道）分组，组顺序即优先级。
+    const groups = useMemo(() => modelPickerGroups(config, options), [config, options]);
     const current = value || "";
     const pickerPlaceholder = placeholder || t("settingsPanels.model.select");
 
@@ -57,11 +62,13 @@ export function ModelPicker({ config, value, onChange, capability, className, fu
                 title={current ? modelOptionLabel(config, current) : pickerPlaceholder}
             >
                 <ModelIcon model={current} />
-                <span className="canvas-model-picker-text min-w-0 flex-1 truncate text-left">{current ? modelOptionLabel(config, current) : pickerPlaceholder}</span>
+                {/* [vpapi-canvas] fork：收起状态只显示「模型名 · 单价」，Key 由弹层分组标题承担。 */}
+                <span className="canvas-model-picker-text min-w-0 flex-1 truncate text-left">{current ? modelPickerLabel(current) : pickerPlaceholder}</span>
             </SelectTrigger>
             <SelectContent
                 data-canvas-no-zoom
-                className="z-[1200] w-80 max-w-[calc(100vw-24px)] rounded-xl border border-border/70 bg-popover p-1 shadow-xl"
+                /* [vpapi-canvas] fork：加宽弹层，避免长模型名 + 价格被裁切。 */
+                className="z-[1200] w-[22rem] max-w-[calc(100vw-24px)] rounded-xl border border-border/70 bg-popover p-1 shadow-xl"
                 position="popper"
                 align="start"
                 side="bottom"
@@ -69,11 +76,17 @@ export function ModelPicker({ config, value, onChange, capability, className, fu
                 onPointerDown={(event) => event.stopPropagation()}
                 onMouseDown={(event) => event.stopPropagation()}
             >
-                {options.length ? (
-                    options.map((model) => (
-                        <SelectItem key={model} value={model} textValue={modelOptionLabel(config, model)}>
-                            <ModelLabel config={config} model={model} />
-                        </SelectItem>
+                {groups.length ? (
+                    /* [vpapi-canvas] fork：先按 Key 分组，再列它自己的模型。 */
+                    groups.map((group) => (
+                        <SelectGroup key={group.id || "plain"}>
+                            {group.label ? <SelectLabel className="truncate">{group.label}</SelectLabel> : null}
+                            {group.models.map((model) => (
+                                <SelectItem key={model} value={model} textValue={modelOptionLabel(config, model)}>
+                                    <ModelLabel config={config} model={model} />
+                                </SelectItem>
+                            ))}
+                        </SelectGroup>
                     ))
                 ) : (
                     <SelectItem value="__empty__" disabled>
@@ -85,6 +98,13 @@ export function ModelPicker({ config, value, onChange, capability, className, fu
     );
 }
 
+/** [vpapi-canvas] fork：紧凑标签（模型名 · 单价），完整信息见 title。 */
+function modelPickerLabel(value: string) {
+    const name = modelOptionName(value);
+    const price = modelPriceSummary(value);
+    return price ? `${name} · ${price}` : name;
+}
+
 function emptyModelLabel(config: AiConfig, capability?: ModelCapability) {
     const label = capability ? i18n.t(`settingsPanels.model.capabilities.${capability}`) : "";
     if (capability && config.models.length) return i18n.t("settingsPanels.model.assign", { capability: label });
@@ -92,10 +112,16 @@ function emptyModelLabel(config: AiConfig, capability?: ModelCapability) {
 }
 
 function ModelLabel({ config, model }: { config: AiConfig; model: string }) {
+    // [vpapi-canvas] fork：两行排版 —— 模型名一行，单价一行，长名字不再挤成一团被截断。
+    const name = modelOptionName(model);
+    const price = modelPriceSummary(model);
     return (
-        <span className="flex min-w-0 items-center gap-2">
+        <span className="flex min-w-0 items-start gap-2" title={modelOptionLabel(config, model)}>
             <ModelIcon model={model} />
-            <span className="truncate">{modelOptionLabel(config, model)}</span>
+            <span className="flex min-w-0 flex-1 flex-col">
+                <span className="truncate">{name}</span>
+                {price ? <span className="text-xs text-muted-foreground">{price}</span> : null}
+            </span>
         </span>
     );
 }

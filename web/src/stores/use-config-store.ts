@@ -4,9 +4,9 @@ import { persist } from "zustand/middleware";
 import { nanoid } from "nanoid";
 
 import i18n from "@/i18n";
-// [vpapi-canvas] fork 专用：网关地址与能力槽位来自产品层，避免在多处硬编码。
+// [vpapi-canvas] fork 专用：网关地址与接入分组来自产品层，避免在多处硬编码。
 import { GATEWAY_URL } from "@/product/brand";
-import { KEY_SLOTS, SLOT_CHANNEL_ID } from "@/product/vpapi/slots";
+import { EMPTY_GROUP_CHANNEL_ID, groupOfChannel, primaryGatewayChannel, sortGroupChannels } from "@/product/vpapi/slots";
 import { modelPriceSummary } from "@/product/vpapi/pricing";
 
 export type ApiCallFormat = "openai" | "gemini" | "vpapi";
@@ -216,9 +216,13 @@ export function resolveModelVideoSpec(config: AiConfig, value: string) {
     return findChannelModel(config, value)?.model.video;
 }
 
+// [vpapi-canvas] fork：网关有的写 "4k"/"2k"，有的写像素值，两边都折算成像素值再比较。
+const RESOLUTION_ALIASES: Record<string, string> = { "1k": "1024", "2k": "1440", "4k": "2160" };
+
 /** Compare resolutions across the gateway's labels ("4k", "2K", "768P") and the legacy numeric scale ("2160"). */
 function resolutionKey(value: string) {
-    return value.trim().toLowerCase().replace(/p$/, "");
+    const normalized = value.trim().toLowerCase().replace(/p$/, "");
+    return RESOLUTION_ALIASES[normalized] || normalized;
 }
 
 /** Snap a duration onto the durations the gateway accepts; undefined when the model publishes none. */
@@ -229,11 +233,28 @@ export function videoSpecSeconds(spec: ChannelVideoSpec | undefined, value: stri
     return String(durations.reduce((best, item) => (Math.abs(item - requested) < Math.abs(best - requested) ? item : best)));
 }
 
-/** Snap a resolution onto the labels the gateway accepts; undefined when the model publishes none. */
+// [vpapi-canvas] fork：面板没明确选过时写入的通用值（配置默认档与 auto 语义），拿不到匹配才吸附到网关挡位。
+const IMPLICIT_VIDEO_RESOLUTIONS = new Set(["", "auto", "low", "medium", "high", "720"]);
+
+/**
+ * Snap a resolution onto the labels the gateway accepts; undefined when the model publishes none.
+ *
+ * [vpapi-canvas] fork：网关没公布的挡位按「用户手填」处理，原样按标签返回（网关不支持时会明确报错，
+ * 例如 seedance-2.0-mini-XG 公布 720p、用户坚持用 480p），不再静默改成第一档。
+ */
 export function videoSpecResolution(spec: ChannelVideoSpec | undefined, value: string) {
     if (!spec?.resolutions.length) return undefined;
     const requested = resolutionKey(value);
-    return spec.resolutions.find((item) => resolutionKey(item) === requested) || spec.resolutions[0];
+    const matched = spec.resolutions.find((item) => resolutionKey(item) === requested);
+    if (matched) return matched;
+    if (/^\d+$/.test(requested) && !IMPLICIT_VIDEO_RESOLUTIONS.has(requested)) return `${requested}p`;
+    return spec.resolutions[0];
+}
+
+/** [vpapi-canvas] fork：面板的数值输入框展示用（"720p" -> "720"、"4k" -> "2160"）。 */
+export function videoResolutionNumber(value: string) {
+    const key = resolutionKey(value);
+    return /^\d+$/.test(key) ? key : value.trim().replace(/p$/i, "");
 }
 
 function isAiConfigReady(config: AiConfig, model: string) {
@@ -443,13 +464,15 @@ export function defaultBaseUrlForApiFormat(apiFormat: ApiCallFormat) {
 
 /** Replace the channel list and re-derive the model options plus one default model per capability. */
 export function applyChannels(config: AiConfig, channels: ModelChannel[]): AiConfig {
+    // [vpapi-canvas] fork：顶层 apiKey / baseUrl 取第一把非空 Key（文生组优先），不再固定取第一个渠道。
+    const primary = primaryGatewayChannel(channels);
     const next: AiConfig = {
         ...config,
         channels,
         models: modelOptionsFromChannels(channels),
-        baseUrl: channels[0]?.baseUrl || config.baseUrl,
-        apiKey: channels[0]?.apiKey || config.apiKey,
-        apiFormat: channels[0]?.apiFormat || config.apiFormat,
+        baseUrl: primary?.baseUrl || config.baseUrl,
+        apiKey: primary?.apiKey || config.apiKey,
+        apiFormat: primary?.apiFormat || config.apiFormat,
     };
     return {
         ...next,
@@ -472,38 +495,46 @@ function normalizeApiFormat(apiFormat: unknown): ApiCallFormat {
 }
 
 /**
+ * [vpapi-canvas] fork：默认模型必须与槽位能力一致。
+ *
+ * 网关的能力标签（`supported_endpoint_types`）是「生图 / 视频」的唯一来源，
+ * 视频模型一旦混进生图槽位（例如助手按文字指定模型），生成会走图片端点，
+ * 所以这里对不匹配的值直接清空，让用户重新选。
+ */
+function pickCapabilityModel(config: AiConfig, capability: ModelCapability, value: string) {
+    const options = selectableModelsByCapability(config, capability);
+    const normalized = normalizeModelOptionValue(value, config.channels);
+    return options.includes(normalized) ? normalized : "";
+}
+
+/**
  * [vpapi-canvas] fork 专用：画布只对接 vpapi。
  *
- * 把配置收敛成「一组 vpapi 渠道（按能力槽位存放各自的 API Key）+ 官方网关 + vpapi 协议」，
- * 模型、默认模型随之重算。上游的渠道管理、协议切换与模型脚本入口因此不会生效
- * （界面入口也已隐藏），但上游代码保持原样，方便同步。
+ * 把配置收敛成「文生 / 媒体两组渠道（每组可接多把 Key，组内顺序即优先级）+ 官方网关 + vpapi 协议」，
+ * 模型与默认模型随之重算；不带分组前缀的渠道（上游渠道、旧的单槽位渠道）会被丢弃。
+ * 上游的渠道管理、协议切换与模型脚本入口因此不会生效（界面入口也已隐藏），但上游代码保持原样，方便同步。
  */
 function lockProductConfig(config: AiConfig): AiConfig {
-    const channels = KEY_SLOTS.map((slot) => {
-        const id = SLOT_CHANNEL_ID[slot];
-        const source = config.channels.find((channel) => channel.id === id);
-        return createModelChannel({
-            id,
-            name: `vpapi · ${slot}`,
-            baseUrl: VPAPI_BASE_URL,
-            apiFormat: "vpapi",
-            // 文本槽位沿用旧版单 Key 配置（历史配置的渠道 id 就是它）。
-            apiKey: source?.apiKey || (slot === "text" ? config.apiKey || "" : ""),
-            models: source?.models || [],
-        });
-    }).filter((channel, index) => index === 0 || channel.apiKey.trim() || channel.models.length);
-    const primary = channels[0];
-    return {
+    const kept = sortGroupChannels(config.channels.filter((channel) => groupOfChannel(channel.id) && (channel.apiKey.trim() || channel.models.length))).map((channel) =>
+        createModelChannel({ ...channel, baseUrl: VPAPI_BASE_URL, apiFormat: "vpapi" }),
+    );
+    // 一把 Key 都没有时保留固定 id 的占位渠道，让「是否已接入」与默认模型仍有落点。
+    const channels = kept.length ? kept : [createModelChannel({ id: EMPTY_GROUP_CHANNEL_ID, name: "vpapi · text", baseUrl: VPAPI_BASE_URL, apiFormat: "vpapi" })];
+    const primary = primaryGatewayChannel(channels) as ModelChannel;
+    const locked: AiConfig = {
         ...config,
         channels,
         baseUrl: primary.baseUrl,
         apiKey: primary.apiKey,
         apiFormat: "vpapi",
         models: modelOptionsFromChannels(channels),
-        imageModel: normalizeModelOptionValue(config.imageModel || config.model, channels),
-        videoModel: normalizeModelOptionValue(config.videoModel, channels),
-        textModel: normalizeModelOptionValue(config.textModel || config.model, channels),
-        audioModel: normalizeModelOptionValue(config.audioModel || defaultConfig.audioModel, channels),
+    };
+    return {
+        ...locked,
+        imageModel: pickCapabilityModel(locked, "image", config.imageModel || config.model),
+        videoModel: pickCapabilityModel(locked, "video", config.videoModel),
+        textModel: pickCapabilityModel(locked, "text", config.textModel || config.model),
+        audioModel: pickCapabilityModel(locked, "audio", config.audioModel || defaultConfig.audioModel),
     };
 }
 

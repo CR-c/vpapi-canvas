@@ -2,7 +2,6 @@ import axios from "axios";
 import i18n from "@/i18n";
 
 import { GATEWAY_URL } from "../brand";
-import { SLOT_CHANNEL_ID, type KeySlot } from "./slots";
 
 /**
  * 模型价格缓存：接入 / 重新读取模型时顺带拉一次网关的价格目录，
@@ -11,7 +10,7 @@ import { SLOT_CHANNEL_ID, type KeySlot } from "./slots";
  * 2. 生成前提示本次预计消耗；
  * 3. 后台设置面板展示。
  *
- * 缓存以「槽位渠道 id::模型名」为键，保存**全部档位**，
+ * 缓存以「渠道 id::模型名」为键，保存**全部档位**，
  * 生成时再按用户选的分辨率 / 时长 / 是否有参考图匹配档位，避免接入时锁死价格。
  */
 const STORAGE_KEY = "vpapi-canvas:model-pricing";
@@ -61,14 +60,14 @@ function writeModelPricing(map: Record<string, ModelPrice>) {
     }
 }
 
-/** 拉取该槽位 Key 可见分组的价格目录并合并进缓存；失败不影响接入。 */
-export async function refreshModelPricing(apiKey: string, slot: KeySlot, baseUrl = GATEWAY_URL): Promise<void> {
+/** 拉取该 Key 可见分组的价格目录并合并进缓存；失败不影响接入。 */
+export async function refreshModelPricing(apiKey: string, channelId: string, baseUrl = GATEWAY_URL): Promise<void> {
     const response = await axios.get<{ success?: boolean; data?: Catalog }>(`${baseUrl.replace(/\/+$/, "")}/api/usage/pricing`, {
         headers: { Authorization: `Bearer ${apiKey.trim()}` },
     });
     const catalog = response.data?.data;
     if (!catalog?.models?.length) return;
-    const prefix = `${SLOT_CHANNEL_ID[slot]}::`;
+    const prefix = `${channelId}::`;
     const next = Object.fromEntries(Object.entries(readModelPricing()).filter(([key]) => !key.startsWith(prefix)));
     for (const model of catalog.models) {
         const name = (model.model_name || "").trim();

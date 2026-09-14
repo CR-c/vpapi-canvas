@@ -183,10 +183,24 @@ export async function runProductTool(name: string, input: Record<string, unknown
         return { ok: true, path };
     }
     if (isSiteTool(name)) {
+        requireSiteModelCapability(name, input);
         const snapshot = context.canvas?.snapshot || null;
         return runSiteTool(name, input, context.navigate, { canvasSnapshot: snapshot });
     }
     throw new Error(`unknown tool: ${name}`);
+}
+
+/**
+ * 创作台的模型参数必须是该能力的模型：助手有时会直接按名字挑模型
+ * （例如把视频模型 seedance-2.0-mini-XG 传给生图工具），写进槽位后就会走错端点。
+ */
+function requireSiteModelCapability(name: string, input: Record<string, unknown>) {
+    const capability = name === "workbench_image_generate" ? "image" : name === "workbench_video_generate" ? "video" : null;
+    const requested = capability && typeof input.model === "string" ? input.model.trim() : "";
+    if (!capability || !requested) return;
+    const options = selectableModelsByCapability(useConfigStore.getState().config, capability);
+    if (options.some((value) => value === requested || modelOptionName(value) === requested)) return;
+    throw new Error(i18n.t("product.agent.modelNotForCapability", { model: requested, capability: i18n.t(`settingsPanels.model.capabilities.${capability}`) }));
 }
 
 function requireCanvas(context: ProductToolContext): AgentCanvasContext {

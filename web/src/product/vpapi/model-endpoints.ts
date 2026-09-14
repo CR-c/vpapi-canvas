@@ -3,7 +3,6 @@ import axios from "axios";
 import { buildApiUrl } from "@/stores/use-config-store";
 
 import { GATEWAY_URL } from "../brand";
-import { SLOT_CHANNEL_ID, type KeySlot } from "./slots";
 
 /**
  * 每个模型在网关上公布的 `supported_endpoint_types` 缓存。
@@ -12,7 +11,7 @@ import { SLOT_CHANNEL_ID, type KeySlot } from "./slots";
  * （例如 Gemini / GPT 的 image 系列也带 `openai`）时会被归到图片类，
  * 导致这类 Key 在画布上没有可选的文本模型。助手需要按端点能力挑对话模型，所以单独缓存这份数据。
  *
- * 缓存以「槽位渠道 id::模型名」为键，避免不同 Key 下同名模型互相覆盖。
+ * 缓存以「渠道 id::模型名」为键，避免不同 Key 下同名模型互相覆盖。
  */
 const STORAGE_KEY = "vpapi-canvas:model-endpoints";
 
@@ -20,8 +19,8 @@ type EndpointMap = Record<string, string[]>;
 
 const CHAT_ENDPOINTS = ["openai", "openai-response", "anthropic", "gemini"];
 
-export function modelKey(slot: KeySlot, model: string) {
-    return `${SLOT_CHANNEL_ID[slot]}::${model}`;
+export function modelKey(channelId: string, model: string) {
+    return `${channelId}::${model}`;
 }
 
 export function readModelEndpoints(): EndpointMap {
@@ -41,15 +40,15 @@ function writeModelEndpoints(map: EndpointMap) {
     }
 }
 
-/** 拉取某个槽位 Key 的模型端点能力并合并进缓存。 */
-export async function refreshModelEndpoints(apiKey: string, slot: KeySlot, baseUrl = GATEWAY_URL): Promise<EndpointMap> {
+/** 拉取某把 Key 的模型端点能力并合并进缓存。 */
+export async function refreshModelEndpoints(apiKey: string, channelId: string, baseUrl = GATEWAY_URL): Promise<EndpointMap> {
     const response = await axios.get<{ data?: Array<{ id?: string; supported_endpoint_types?: string[] }> }>(buildApiUrl(baseUrl, "/models"), { headers: { Authorization: `Bearer ${apiKey.trim()}` } });
-    const prefix = `${SLOT_CHANNEL_ID[slot]}::`;
+    const prefix = `${channelId}::`;
     const next = Object.fromEntries(Object.entries(readModelEndpoints()).filter(([key]) => !key.startsWith(prefix)));
     (response.data?.data || []).forEach((model) => {
         if (!model?.id) return;
         const types = Array.isArray(model.supported_endpoint_types) ? model.supported_endpoint_types.filter((type): type is string => typeof type === "string") : [];
-        if (types.length) next[modelKey(slot, model.id)] = types;
+        if (types.length) next[modelKey(channelId, model.id)] = types;
     });
     writeModelEndpoints(next);
     return next;

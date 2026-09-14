@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 
 import { LINKS } from "@/product/brand";
 import { useQuotaStore } from "@/product/vpapi/quota-store";
+import { hasGatewayKey } from "@/product/vpapi/slots";
 import { useConfigStore } from "@/stores/use-config-store";
 
 const REFRESH_INTERVAL_MS = 60000;
@@ -27,7 +28,7 @@ function formatExpiry(value: number) {
  */
 export function QuotaChip() {
     const { t } = useTranslation();
-    const apiKey = useConfigStore((state) => state.config.apiKey);
+    const connected = useConfigStore((state) => hasGatewayKey(state.config));
     const status = useQuotaStore((state) => state.status);
     const remaining = useQuotaStore((state) => state.remaining);
     const used = useQuotaStore((state) => state.used);
