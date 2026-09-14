@@ -6,41 +6,58 @@ import { SLOT_CHANNEL_ID, type KeySlot } from "./slots";
 
 /**
  * 模型价格缓存：接入 / 重新读取模型时顺带拉一次网关的价格目录，
- * 生成前用它提示本次预计消耗的额度。
+ * 用于三处：
+ * 1. 模型选择器里显示单价（modelOptionLabel 会带上）；
+ * 2. 生成前提示本次预计消耗；
+ * 3. 后台设置面板展示。
  *
- * 缓存以「槽位渠道 id::模型名」为键，与端点能力缓存一致。
+ * 缓存以「槽位渠道 id::模型名」为键，保存**全部档位**，
+ * 生成时再按用户选的分辨率 / 时长 / 是否有参考图匹配档位，避免接入时锁死价格。
  */
 const STORAGE_KEY = "vpapi-canvas:model-pricing";
+
+export type ModelPriceTier = {
+    /** 档位标识，如 480p_no_ref / gt_236w */
+    costTier: string;
+    /** 分辨率，如 480p / 2K */
+    resolution: string;
+    /** 按次单价（按次计费模型） */
+    unitPrice: number;
+    /** 每秒单价（按秒 / token 计费的视频模型） */
+    perSecond?: number;
+};
 
 export type ModelPrice = {
     /** 计费方式：按次 / 按秒 / 按 token */
     unit: "call" | "second" | "million_tokens";
-    /** 按次单价（unit=call） */
-    amount: number;
-    /** 每秒单价（unit=second / million_tokens 的多数视频模型会给） */
-    perSecond?: number;
     currency: string;
+    tiers: ModelPriceTier[];
 };
 
 type CatalogPrice = { currency?: string; unit_price?: number; per_second_cost?: number };
 type CatalogTier = { cost_tier?: string; resolution?: string; prices?: Record<string, CatalogPrice> };
 type CatalogModel = { model_name?: string; billing_unit?: string; tiers?: CatalogTier[] };
-type Catalog = { groups?: Record<string, { currency?: string }>; models?: CatalogModel[] };
+type Catalog = { models?: CatalogModel[] };
+
+let cache: Record<string, ModelPrice> | null = null;
 
 export function readModelPricing(): Record<string, ModelPrice> {
+    if (cache) return cache;
     try {
         const parsed = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
-        return parsed && typeof parsed === "object" ? (parsed as Record<string, ModelPrice>) : {};
+        cache = parsed && typeof parsed === "object" ? (parsed as Record<string, ModelPrice>) : {};
     } catch {
-        return {};
+        cache = {};
     }
+    return cache;
 }
 
 function writeModelPricing(map: Record<string, ModelPrice>) {
+    cache = map;
     try {
         localStorage.setItem(STORAGE_KEY, JSON.stringify(map));
     } catch {
-        /* 忽略存储失败：只影响消耗提示 */
+        /* 忽略存储失败：只影响价格展示 */
     }
 }
 
@@ -55,39 +72,33 @@ export async function refreshModelPricing(apiKey: string, slot: KeySlot, baseUrl
     const next = Object.fromEntries(Object.entries(readModelPricing()).filter(([key]) => !key.startsWith(prefix)));
     for (const model of catalog.models) {
         const name = (model.model_name || "").trim();
-        const price = readCatalogPrice(model);
+        const price = readCatalogModel(model);
         if (name && price) next[`${prefix}${name}`] = price;
     }
     writeModelPricing(next);
 }
 
-/** 取第一个带价格的档位（多档位模型取第一档，够用来做预估值）。 */
-function readCatalogPrice(model: CatalogModel): ModelPrice | undefined {
+function readCatalogModel(model: CatalogModel): ModelPrice | undefined {
     const unit = model.billing_unit === "second" ? "second" : model.billing_unit === "call" ? "call" : model.billing_unit === "million_tokens" ? "million_tokens" : undefined;
     if (!unit) return undefined;
+    const tiers: ModelPriceTier[] = [];
+    let currency = "";
     for (const tier of model.tiers || []) {
         const price = Object.values(tier.prices || {})[0];
         if (!price) continue;
-        const currency = price.currency || "CNY";
-        if (unit === "call") {
-            const amount = Number(price.unit_price ?? 0);
-            if (amount > 0) return { unit, amount, currency };
-            continue;
-        }
+        currency = currency || price.currency || "CNY";
+        const unitPrice = Number(price.unit_price ?? 0);
         const perSecond = Number(price.per_second_cost ?? 0);
-        if (perSecond > 0) return { unit, amount: Number(price.unit_price ?? 0), perSecond, currency };
+        if (!unitPrice && !perSecond) continue;
+        tiers.push({
+            costTier: (tier.cost_tier || "").trim(),
+            resolution: (tier.resolution || "").trim(),
+            unitPrice,
+            ...(perSecond > 0 ? { perSecond } : {}),
+        });
     }
-    return undefined;
-}
-
-function currencySymbol(currency: string) {
-    if (currency === "CNY") return "¥";
-    if (currency === "USD") return "$";
-    return `${currency} `;
-}
-
-function formatAmount(value: number, currency: string) {
-    return `${currencySymbol(currency)}${value.toFixed(2)}`;
+    if (!tiers.length) return undefined;
+    return { unit, currency: currency || "CNY", tiers };
 }
 
 /** 兼容两种入参：编码值（`渠道id::模型名`）或纯模型名。 */
@@ -101,25 +112,92 @@ function lookupPrice(value: string): ModelPrice | undefined {
     return matched ? map[matched] : undefined;
 }
 
-/** 生成前提示文案；拿不到价格时返回空串（不打扰用户）。 */
-export function generationCostNotice(encodedModel: string, options: { count?: number; seconds?: number } = {}) {
-    const price = lookupPrice(encodedModel);
-    if (!price) return "";
-    const count = Math.max(1, Math.floor(options.count || 1));
-    if (price.unit === "call") {
-        return i18n.t("product.cost.notice", { amount: formatAmount(price.amount * count, price.currency) });
-    }
-    const seconds = Math.max(1, Math.floor(options.seconds || 0));
-    if (!price.perSecond || !seconds) return "";
-    const amount = formatAmount(price.perSecond * seconds, price.currency);
-    return i18n.t("product.cost.noticeByTime", { amount, seconds, rate: formatAmount(price.perSecond, price.currency) });
+/** 分辨率归一：去掉 p、统一大小写，并把像素值折算成档位名。 */
+function resolutionKey(value: string) {
+    const normalized = (value || "").trim().toLowerCase().replace(/p$/, "");
+    if (normalized === "2160") return "4k";
+    if (normalized === "1440") return "2k";
+    if (normalized === "1024") return "1k";
+    return normalized;
 }
 
-/** 模型价格摘要（设置面板展示用）。 */
+export type PriceContext = {
+    /** 生成张数（按次计费） */
+    count?: number;
+    /** 视频时长（按秒计费） */
+    seconds?: number;
+    /** 选中的分辨率，如 720 / 720p / 2k */
+    resolution?: string;
+    /** 图片质量档（如 gt_236w / high） */
+    quality?: string;
+    /** 是否带参考图 */
+    hasReferences?: boolean;
+};
+
+/** 按分辨率 / 质量 / 参考图挑最贴近的一档；匹配不到时用第一档。 */
+function pickTier(price: ModelPrice, context: PriceContext): ModelPriceTier {
+    const resolution = resolutionKey(context.resolution || "");
+    const quality = (context.quality || "").trim().toLowerCase();
+    let best = price.tiers[0];
+    let bestScore = -Infinity;
+    for (const tier of price.tiers) {
+        const tierResolution = resolutionKey(tier.resolution || tier.costTier);
+        const tierTier = (tier.costTier || "").toLowerCase();
+        let score = 0;
+        if (resolution && tierResolution === resolution) score += 4;
+        if (quality && (tierTier === quality || tierResolution === quality)) score += 4;
+        if (context.hasReferences === true) score += tierTier.includes("with_ref") ? 2 : tierTier.includes("no_ref") ? -2 : 0;
+        if (context.hasReferences === false) score += tierTier.includes("no_ref") ? 1 : tierTier.includes("with_ref") ? -1 : 0;
+        if (score > bestScore) {
+            bestScore = score;
+            best = tier;
+        }
+    }
+    return best;
+}
+
+function currencySymbol(currency: string) {
+    if (currency === "CNY") return "¥";
+    if (currency === "USD") return "$";
+    return `${currency} `;
+}
+
+function formatAmount(value: number, currency: string) {
+    return `${currencySymbol(currency)}${value.toFixed(2)}`;
+}
+
+/** 生成前提示文案；拿不到价格时返回空串（不打扰用户）。 */
+export function generationCostNotice(encodedModel: string, context: PriceContext = {}) {
+    const price = lookupPrice(encodedModel);
+    if (!price) return "";
+    const tier = pickTier(price, context);
+    if (price.unit === "call") {
+        const count = Math.max(1, Math.floor(context.count || 1));
+        return i18n.t("product.cost.notice", { amount: formatAmount(tier.unitPrice * count, price.currency) });
+    }
+    const seconds = Math.max(1, Math.floor(context.seconds || 0));
+    if (!tier.perSecond || !seconds) return "";
+    return i18n.t("product.cost.noticeByTime", {
+        amount: formatAmount(tier.perSecond * seconds, price.currency),
+        seconds,
+        rate: formatAmount(tier.perSecond, price.currency),
+    });
+}
+
+function priceValues(price: ModelPrice) {
+    if (price.unit === "call") return price.tiers.map((tier) => tier.unitPrice).filter((value) => value > 0);
+    return price.tiers.map((tier) => tier.perSecond || 0).filter((value) => value > 0);
+}
+
+/** 模型单价摘要（模型选择器 / 设置面板展示用）：多档位时标「起」。 */
 export function modelPriceSummary(encodedModel: string) {
     const price = lookupPrice(encodedModel);
     if (!price) return "";
-    if (price.unit === "call") return i18n.t("product.cost.perCall", { amount: formatAmount(price.amount, price.currency) });
-    if (price.perSecond) return i18n.t("product.cost.perSecond", { amount: formatAmount(price.perSecond, price.currency) });
-    return "";
+    const values = priceValues(price);
+    if (!values.length) return "";
+    const cheapest = Math.min(...values);
+    const amount = formatAmount(cheapest, price.currency);
+    const multiple = new Set(values.map((value) => value.toFixed(4))).size > 1;
+    if (price.unit === "call") return multiple ? i18n.t("product.cost.perCallFrom", { amount }) : i18n.t("product.cost.perCall", { amount });
+    return multiple ? i18n.t("product.cost.perSecondFrom", { amount }) : i18n.t("product.cost.perSecond", { amount });
 }

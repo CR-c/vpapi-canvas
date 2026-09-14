@@ -62,7 +62,7 @@ export async function requestVideoGeneration(config: AiConfig, prompt: string, r
 
 export async function createVideoGenerationTask(config: AiConfig, prompt: string, references: ReferenceImage[] = [], options?: VideoMediaOptions): Promise<VideoGenerationTask> {
     const selectedModel = (config.model || config.videoModel).trim();
-    notifyModelCost(selectedModel, Number(config.videoSeconds));
+    notifyModelCost(selectedModel, { seconds: Number(config.videoSeconds), resolution: config.vquality, hasReferences: references.length > 0 });
     const requestConfig = resolveModelRequestConfig(config, selectedModel);
     const script = resolveModelScript(config, selectedModel);
     if (script) return createPluginVideoTask(requestConfig, selectedModel, script, prompt, references, options);
@@ -397,7 +397,7 @@ function delay(ms: number, signal?: AbortSignal) {
 }
 
 /** [vpapi-canvas] fork：按网关价格目录提示本次预计消耗（拿不到价格时静默）。 */
-function notifyModelCost(encodedModel: string, seconds: number) {
-    const notice = generationCostNotice(encodedModel, { seconds });
+function notifyModelCost(encodedModel: string, context: { seconds?: number; resolution?: string; hasReferences?: boolean }) {
+    const notice = generationCostNotice(encodedModel, context);
     if (notice) useProductStore.getState().pushNotice(notice);
 }
