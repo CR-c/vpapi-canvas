@@ -29,7 +29,7 @@ fork 的第一目标是「既要专用，又要随时能合上游」——上游
 | 上游文件 | 改动 | 原因 |
 | --- | --- | --- |
 | `web/src/stores/use-config-store.ts` | 默认配置、`merge`、协议规范化统一过 `lockProductConfig()` | 锁定 vpapi 协议与官方网关地址 |
-| `web/src/components/layout/client-root-init.tsx` | 挂载 `useProductBootstrap()` | 首启引导、`?apiKey=` 一键接入、品牌文案注入 |
+| `web/src/components/layout/client-root-init.tsx` | 挂载 `useProductBootstrap()` 与产品浮层 | 首启引导、`?apiKey=` 一键接入、品牌文案注入、生成消耗提示 |
 | `web/src/components/layout/app-config-modal.tsx` | 渠道页渲染 `ProductChannelsPanel` | 替换渠道管理 / 协议下拉 / 模型脚本入口 |
 | `web/src/components/layout/app-top-nav.tsx` | 插入 `QuotaChip` | 展示 Key 剩余额度 |
 | `web/src/components/agent/agent-panel.tsx` | 默认渲染内置 Agent，可切回本地 CLI Agent | 让 vpapi 用户直接用上助手 |
