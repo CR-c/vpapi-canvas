@@ -2,6 +2,7 @@
 
 ## Unreleased
 
++ [修复] MiniMax 视频模型带参考图生成被网关拒绝的问题：网关放行画布上传的 base64 参考素材并托管为签名 HTTPS 地址再转发上游，`minimax-h3-d` / `minimax-h3-max-d` 的图生视频恢复可用。
 + [新增] 原生内置 vpapi 协议：默认渠道走 `https://api.zkki.net`，配置页「一步接入」粘贴 API Key 即自动拉取模型，并按网关公布的 `supported_endpoint_types` 识别生图 / 视频 / 文本能力、设好默认项。
 + [新增] 图片生成 / 图生图改走 vpapi 异步契约（`Prefer: respond-async` 提交 + 轮询任务），长耗时生成不再受反向代理超时限制；不支持异步的网关自动回退到同步结果。
 + [新增] 视频时长 / 分辨率按网关 model 的 `video_capabilities` 自动吸附到允许挡位，并在设置面板展示（不再依赖内置关键字规则）。
