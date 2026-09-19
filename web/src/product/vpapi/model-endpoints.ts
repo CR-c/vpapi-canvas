@@ -43,9 +43,14 @@ function writeModelEndpoints(map: EndpointMap) {
 /** 拉取某把 Key 的模型端点能力并合并进缓存。 */
 export async function refreshModelEndpoints(apiKey: string, channelId: string, baseUrl = GATEWAY_URL): Promise<EndpointMap> {
     const response = await axios.get<{ data?: Array<{ id?: string; supported_endpoint_types?: string[] }> }>(buildApiUrl(baseUrl, "/models"), { headers: { Authorization: `Bearer ${apiKey.trim()}` } });
+    return cacheModelEndpoints(channelId, response.data?.data || []);
+}
+
+/** 接入时复用已经取得的模型响应，避免重复请求模型目录。 */
+export function cacheModelEndpoints(channelId: string, models: Array<{ id?: string; supported_endpoint_types?: string[] }>): EndpointMap {
     const prefix = `${channelId}::`;
     const next = Object.fromEntries(Object.entries(readModelEndpoints()).filter(([key]) => !key.startsWith(prefix)));
-    (response.data?.data || []).forEach((model) => {
+    models.forEach((model) => {
         if (!model?.id) return;
         const types = Array.isArray(model.supported_endpoint_types) ? model.supported_endpoint_types.filter((type): type is string => typeof type === "string") : [];
         if (types.length) next[modelKey(channelId, model.id)] = types;

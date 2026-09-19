@@ -14,8 +14,8 @@ const emptyKeys: Record<KeyGroup, string> = { text: "", media: "" };
 /**
  * 接入引导：文生与媒体各填一行 Key。
  *
- * vpapi 的令牌按分组暴露不同模型：文生 Key 供助手与文本节点使用，媒体 Key 供图片 / 视频 / 音频使用。
- * 每组都能接多把 Key（设置页里添加并调整优先级），这里先各接一把即可；只填一行也能用，另一类能力稍后补。
+ * 文生与媒体只是画布的 Key 整理分类，不限制模型能力，也不对应网关计费分组。
+ * 一把 Key 填一次即可导入全部可用模型；多把 Key 可在设置页添加并调整优先级。
  */
 export function ConnectGate() {
     const { message } = App.useApp();

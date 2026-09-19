@@ -5,7 +5,7 @@ import { fetchChannelModels } from "@/services/api/image";
 import { applyChannels, buildApiUrl, createModelChannel, useConfigStore, type AiConfig, type ChannelModel, type ModelChannel } from "@/stores/use-config-store";
 
 import { GATEWAY_URL } from "../brand";
-import { refreshModelEndpoints } from "./model-endpoints";
+import { cacheModelEndpoints } from "./model-endpoints";
 import { refreshModelPricing } from "./pricing";
 import { channelsOfGroup, channelPriority, createGroupChannelId, groupChannelName, groupOfChannel, KEY_GROUPS, sortGroupChannels, type KeyGroup } from "./slots";
 
@@ -36,17 +36,17 @@ function commitChannels(config: AiConfig, channels: ModelChannel[]) {
 
 /**
  * 读取网关模型目录（能力分类与视频约束由上游 `fetchChannelModels` 解析）。
- * 失败时重新探测一次响应，把 vpapi 的鉴权 / 分组 / 额度错误翻译成可操作的提示。
+ * 同一次响应缓存端点能力；直接按失败响应区分鉴权、限流与额度问题。
  */
-export async function connectGateway(apiKey: string): Promise<ChannelModel[]> {
+export async function connectGateway(apiKey: string, channelId?: string): Promise<ChannelModel[]> {
     const key = apiKey.trim();
     const channel = createGatewayChannel("text", key);
     try {
-        const models = await fetchChannelModels(channel);
+        const models = await fetchChannelModels(channel, channelId ? (catalog) => cacheModelEndpoints(channelId, catalog) : undefined);
         if (!models.length) throw new Error(text("empty"));
         return models;
     } catch (error) {
-        throw new Error(await describeGatewayFailure(error, key));
+        throw new Error(describeGatewayFailure(error));
     }
 }
 
@@ -124,28 +124,19 @@ async function fetchGatewaySiteInfo(): Promise<{ symbol: string }> {
 }
 
 /** 把网关失败响应翻译成产品文案；无法归类时回落到上游给出的消息。 */
-async function describeGatewayFailure(error: unknown, apiKey: string): Promise<string> {
-    const probe = await probeGateway(apiKey);
-    if (probe) return probe;
-    if (axios.isAxiosError(error) && !error.response) return text("unreachable", { url: GATEWAY_URL });
-    return error instanceof Error && error.message ? text("failed", { error: error.message }) : text("failed", { error: "" });
-}
-
-async function probeGateway(apiKey: string): Promise<string | null> {
-    try {
-        await axios.get(buildApiUrl(GATEWAY_URL, "/models"), { headers: { Authorization: `Bearer ${apiKey}` } });
-        return null;
-    } catch (error) {
-        if (!axios.isAxiosError(error)) return null;
+function describeGatewayFailure(error: unknown): string {
+    if (axios.isAxiosError(error)) {
         if (!error.response) return text("unreachable", { url: GATEWAY_URL });
         const body = error.response.data as { error?: { message?: string; code?: string }; message?: string } | undefined;
         const code = body?.error?.code || "";
         const message = body?.error?.message || body?.message || "";
         if (error.response.status === 401) return text("invalidKey");
         if (code === "token_group_required" || /group is required/i.test(message)) return text("groupRequired");
-        if (error.response.status === 402 || error.response.status === 429 || /quota|额度|余额|insufficient/i.test(message)) return text("quotaExhausted");
-        return message ? text("failed", { error: message }) : null;
+        if (error.response.status === 402 || /quota|额度|余额|insufficient/i.test(`${code} ${message}`)) return text("quotaExhausted");
+        if (error.response.status === 429) return text("rateLimited");
+        if (message) return text("failed", { error: message });
     }
+    return error instanceof Error && error.message ? text("failed", { error: error.message }) : text("failed", { error: "" });
 }
 
 /** 该 Key 已经接在哪一组第几把（同一把 Key 只接一次）。 */
@@ -169,11 +160,11 @@ export async function addGatewayKey(apiKey: string, group: KeyGroup): Promise<nu
     const key = apiKey.trim();
     const duplicate = duplicateKeyError(config, key);
     if (duplicate) throw new Error(duplicate);
-    const models = await connectGateway(key);
-    const channel = createGatewayChannel(group, key, models);
+    const channelId = createGroupChannelId(group);
+    const models = await connectGateway(key, channelId);
+    const channel = createGatewayChannel(group, key, models, channelId);
     commitChannels(config, [...liveChannels(config), channel]);
-    // 端点能力用于助手挑选对话模型，价格目录用于生成前提示消耗；失败不影响接入本身。
-    await refreshModelEndpoints(key, channel.id).catch(() => null);
+    // 价格目录用于生成前提示消耗；失败不影响接入本身。
     await refreshModelPricing(key, channel.id).catch(() => null);
     return models.length;
 }
@@ -208,9 +199,8 @@ export async function reloadGatewayKey(channelId: string): Promise<number> {
     const channel = config.channels.find((item) => item.id === channelId);
     const apiKey = channel?.apiKey.trim();
     if (!group || !channel || !apiKey) throw new Error(text("missingKey"));
-    const models = await connectGateway(apiKey);
+    const models = await connectGateway(apiKey, channelId);
     commitChannels(config, liveChannels(config).map((item) => (item.id === channelId ? createGatewayChannel(group, apiKey, models, channelId) : item)));
-    await refreshModelEndpoints(apiKey, channelId).catch(() => null);
     await refreshModelPricing(apiKey, channelId).catch(() => null);
     return models.length;
 }
@@ -226,9 +216,8 @@ export async function replaceGatewayKey(channelId: string, apiKey: string): Prom
     if (key === channel.apiKey.trim()) return reloadGatewayKey(channelId);
     const duplicate = duplicateKeyError(config, key);
     if (duplicate) throw new Error(duplicate);
-    const models = await connectGateway(key);
+    const models = await connectGateway(key, channelId);
     commitChannels(config, liveChannels(config).map((item) => (item.id === channelId ? createGatewayChannel(group, key, models, channelId) : item)));
-    await refreshModelEndpoints(key, channelId).catch(() => null);
     await refreshModelPricing(key, channelId).catch(() => null);
     return models.length;
 }

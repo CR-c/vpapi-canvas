@@ -35,7 +35,8 @@ fork 的第一目标是「既要专用，又要随时能合上游」——上游
 | `web/src/components/agent/agent-panel.tsx` | 默认渲染内置 Agent，可切回本地 CLI Agent | 让 vpapi 用户直接用上助手 |
 | `web/src/components/layout/github-link.tsx`、`web/src/hooks/use-version-check.ts` | 指向 fork 仓库 / 关闭上游更新检查 | 品牌与更新源 |
 | `web/index.html`、`web/public/logo.svg` | 站点标题、图标 | 品牌 |
-| `web/src/services/api/video.ts` | `metadata.url` 结果链接、瞬时错误重试、取回降级链 | 生成结果可靠性（上游未含） |
+| `web/src/services/api/video.ts` | `metadata.url` 结果链接、瞬时错误重试、取回降级链；产品层判定任务终态并发送已公布的音轨 / 水印参数 | 生成结果可靠性（上游未含） |
+| `web/src/services/api/image.ts` | vpapi 异步图像任务；模型目录读取回调与原始错误透传 | 一次模型读取同时更新端点缓存，保留鉴权 / 限流错误分类 |
 | `web/src/components/video-settings-panel.tsx` | 分辨率输入框按像素值展示当前挡位 | 网关挡位带 `p` / `4k` 后缀，数字输入框无法解析会显示为空 |
 | `web/src/components/model-picker.tsx` | 选项按接入 Key 分组渲染，条目改为「模型名 + 单价」两行排版并加宽弹层 | 模型名 + 价格拼在一行时过长，弹层里经常被裁切遮挡；分组后才能先看到 Key 再选模型 |
 

@@ -11,6 +11,8 @@ import type { ReferenceAudio, ReferenceVideo } from "@/types/media";
 // [vpapi-canvas] fork：生成前按网关价格提示本次消耗。
 import { generationCostNotice } from "@/product/vpapi/pricing";
 import { useProductStore } from "@/product/store";
+// [vpapi-canvas] fork：正式视频接口与公布的能力、任务终态保持一致。
+import { gatewayVideoOptions, gatewayVideoState } from "@/product/vpapi/media-contract";
 
 type VideoResponse = { id: string; status?: string; error?: { message?: string }; url?: string; result_url?: string; video_url?: string; metadata?: { url?: string; video_url?: string; result_url?: string } | null; content?: { video_url?: string; url?: string } | null };
 type ApiVideoResponse = VideoResponse | { code?: number | string; data?: VideoResponse | null; msg?: string; message?: string; error?: { message?: string } };
@@ -163,6 +165,8 @@ async function createOpenAIVideoTask(config: AiConfig, model: string, prompt: st
         ...(ratio ? { ratio, aspect_ratio: ratio, metadata: { ratio } } : {}),
         resolution: adaptVideoResolution(config.vquality, modelName, spec),
         preset: "normal",
+        // [vpapi-canvas] fork：插件之外的正式接口也应保留音轨 / 水印设置。
+        ...gatewayVideoOptions(config.videoGenerateAudio, config.videoWatermark, spec),
     };
     // Send typed arrays so @图片N / @视频N / @音频N bind 1:1 on Seedance-style gateways.
     if (references.length) {
@@ -196,16 +200,19 @@ async function pollOpenAIVideoTask(config: AiConfig, task: VideoGenerationTask, 
 }
 
 async function readOpenAIVideoTask(config: AiConfig, task: VideoGenerationTask, options?: RequestOptions): Promise<VideoGenerationTaskState> {
-    const video = unwrapVideoResponse((await axios.get<ApiVideoResponse>(aiApiUrl(config, `/videos/${task.id}`), { headers: aiHeaders(config), signal: options?.signal })).data);
+    // [vpapi-canvas] fork：任务 id 作为独立路径段编码，避免被当作查询参数或子路径。
+    const video = unwrapVideoResponse((await axios.get<ApiVideoResponse>(aiApiUrl(config, `/videos/${encodeURIComponent(task.id)}`), { headers: aiHeaders(config), signal: options?.signal })).data);
     const url = videoResultUrl(video);
-    if (url) return { status: "completed", result: await videoResultFromUrl(config, task, url, options) };
-    if (video.status === "completed") return { status: "completed", result: { blob: await fetchVideoContent(config, task, options) } };
-    if (video.status === "failed" || video.status === "cancelled") return { status: "failed", error: readApiErrorMessage(video.error?.message) || apiText("videoGenerationFailed") };
+    // [vpapi-canvas] fork：排队 / 失败任务中的占位链接不能提前触发下载。
+    const state = gatewayVideoState(video.status, url);
+    if (state === "failed") return { status: "failed", error: readApiErrorMessage(video.error) || apiText("videoGenerationFailed") };
+    if (state === "completed") return { status: "completed", result: url ? await videoResultFromUrl(config, task, url, options) : { blob: await fetchVideoContent(config, task, options) } };
     return { status: "pending" };
 }
 
 async function fetchVideoContent(config: AiConfig, task: VideoGenerationTask, options?: RequestOptions) {
-    const content = await axios.get<Blob>(aiApiUrl(config, `/videos/${task.id}/content`), { headers: aiHeaders(config), responseType: "blob", signal: options?.signal });
+    // [vpapi-canvas] fork：下载与状态查询使用相同的任务 id 路径编码。
+    const content = await axios.get<Blob>(aiApiUrl(config, `/videos/${encodeURIComponent(task.id)}/content`), { headers: aiHeaders(config), responseType: "blob", signal: options?.signal });
     await assertVideoBlob(content.data);
     return content.data;
 }

@@ -4,13 +4,16 @@ import i18n from "@/i18n";
 import { buildApiUrl, capabilityFromEndpointTypes, guessCapability, normalizeChannelModels, resolveModelRequestConfig, resolveModelScript, type AiConfig, type ChannelModel, type ChannelVideoSpec, type ModelChannel } from "@/stores/use-config-store";
 import { normalizePluginImages, runModelPlugin } from "./model-plugin";
 import { nanoid } from "nanoid";
-import { dataUrlToFile, readImageMeta } from "@/lib/image-utils";
+// [vpapi-canvas] fork：原生图片任务的二进制结果复用 readFileAsDataUrl 转换。
+import { dataUrlToFile, readImageMeta, readFileAsDataUrl } from "@/lib/image-utils";
 import { buildImageReferencePromptText } from "@/lib/image-reference-prompt";
 import { imageToDataUrl } from "@/services/image-storage";
 import type { ReferenceImage } from "@/types/image";
 // [vpapi-canvas] fork：生成前按网关价格提示本次消耗。
 import { generationCostNotice } from "@/product/vpapi/pricing";
 import { useProductStore } from "@/product/store";
+// [vpapi-canvas] fork：轮询同时支持 JSON 作业和原生图片二进制。
+import { decodeGatewayImageResponse } from "@/product/vpapi/media-contract";
 
 const apiText = (key: string, options?: Record<string, unknown>) => i18n.t(`apiErrors.${key}`, options);
 
@@ -955,22 +958,21 @@ async function pollVpapiImageTask(config: AiConfig, path: string, taskId: string
     const url = `${aiApiUrl(config, path)}/${encodeURIComponent(taskId)}`;
     for (let attempt = 0; attempt < IMAGE_TASK_POLL_ATTEMPTS; attempt += 1) {
         if (options?.signal?.aborted) throw new DOMException("Aborted", "AbortError");
-        try {
-            const response = await axios.get<GatewayImageTask>(url, { headers: aiHeaders(config), signal: options?.signal });
-            if (response.data.status === "failed") throw new Error(readApiErrorMessage(response.data.error) || apiText("requestFailed"));
-            if (response.data.data?.length) return parseImagePayload(response.data);
-        } catch (error) {
-            if (!isImageTaskPending(error)) throw error;
+        // [vpapi-canvas] fork：用 Blob 接收后按真实媒体类型解析，404 仍需核对错误码。
+        const response = await axios.get<Blob>(url, { headers: aiHeaders(config), signal: options?.signal, responseType: "blob", validateStatus: (status) => status >= 200 && status < 300 || status === 404 || status === 502 });
+        const decoded = await decodeGatewayImageResponse(response.data);
+        if (decoded.image && response.status < 300) return [{ id: nanoid(), dataUrl: await readFileAsDataUrl(new File([decoded.image], "generated-image", { type: decoded.image.type })) }];
+        const task = decoded.task;
+        if (!task) throw new Error(apiText("requestFailed"));
+        if (response.status === 404 && task.code === "image_not_ready") {
+            await delay(IMAGE_TASK_POLL_INTERVAL, options?.signal);
+            continue;
         }
+        if (response.status >= 400 || task.status === "failed" || task.status === "cancelled") throw new Error(readApiErrorMessage(task) || apiText("requestFailed"));
+        if (Array.isArray(task.data) && task.data.length) return parseImagePayload(task as GatewayImageTask);
         await delay(IMAGE_TASK_POLL_INTERVAL, options?.signal);
     }
     throw new Error(apiText("imageTimeout"));
-}
-
-/** Task-backed image models answer 404 + image_not_ready until the provider finishes. */
-function isImageTaskPending(error: unknown) {
-    if (!axios.isAxiosError(error) || error.response?.status !== 404) return false;
-    return (error.response.data as { code?: string } | undefined)?.code === "image_not_ready";
 }
 
 function delay(ms: number, signal?: AbortSignal) {
@@ -1029,7 +1031,8 @@ export async function requestImageQuestion(config: AiConfig, messages: AiTextMes
     }
 }
 
-export async function fetchChannelModels(channel: ModelChannel): Promise<ChannelModel[]> {
+// [vpapi-canvas] fork：接入产品层复用同一次模型响应更新端点能力缓存。
+export async function fetchChannelModels(channel: ModelChannel, onCatalog?: (models: GatewayModelEntry[]) => void): Promise<ChannelModel[]> {
     try {
         if (channel.apiFormat === "gemini") {
             const config = { ...defaultGeminiConfig, ...channel };
@@ -1054,8 +1057,13 @@ export async function fetchChannelModels(channel: ModelChannel): Promise<Channel
                 return { name: model.id, capability, ...(video ? { video } : {}) };
             })
             .sort((a, b) => a.name.localeCompare(b.name));
-        return normalizeChannelModels(models);
+        const normalized = normalizeChannelModels(models);
+        // [vpapi-canvas] fork：模型解析成功后才更新关联缓存。
+        if (normalized.length) onCatalog?.(response.data.data || []);
+        return normalized;
     } catch (error) {
+        // [vpapi-canvas] fork：接入层需要原始 HTTP 状态，避免再次请求来猜测错误。
+        if (channel.apiFormat === "vpapi") throw error;
         throw new Error(readAxiosError(error, apiText("modelReadFailed")));
     }
 }
