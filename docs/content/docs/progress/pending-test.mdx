@@ -7,6 +7,11 @@ description: Implemented changes that still need manual verification
 
 The current release needs manual verification in these areas:
 
+- vpapi 接入与分组：创建自动选择分组的 Key，在画布任意一行填一次应导入全部可用图片 / 视频 / 文本模型；接入和重新读取时仅请求一次 `/v1/models`（助手面板独立刷新不计），429 限流应提示稍后重试，401 应提示检查 Key，空模型目录应提示模型限制 / 手选分组，而不是要求充值。失败时已有 Key 与模型列表不变。
+- 图片轮询双契约：用现有图片任务核对 `404 + image_not_ready` 继续轮询、`404 + task_not_found` 立即报错、JSON 结果正常保存、原生 `image/png` / `image/jpeg` 响应正常显示并本地保存、502 任务失败显示网关错误。无需创建付费任务即可用已完成任务回放；取消请求仍应结束轮询。
+- 视频契约：失败 / 取消 / 过期任务即使附有结果链接也应报告失败，排队中附有占位链接仍继续轮询；完成任务通过结果链接或带 Bearer 的 `/content` 取回。只给公布支持的模型发送 `generate_audio` / `watermark`，显式关闭保留 `false`。
+- 新增 `web/src/product/vpapi/media-contract.test.ts` 覆盖上述图片二进制 / JSON 分流、视频终态及 false 值保留。本次按仓库规则未执行测试、类型检查或构建；待允许执行时可运行 `cd web && bun test src/product/vpapi/media-contract.test.ts`，再运行 `npm run typecheck` 和 `npm run build`。
+
 - vpapi one-click integration: on a fresh install, the Settings → Channels tab should show the "一步接入 vpapi" card already prefilled with `https://api.zkki.net`. Pasting a valid API key and clicking Connect should import all models available to that key, categorize them by the gateway's capability labels (image / video / text), and set one default per capability. After connecting, the card should disappear and generating an image, a video, and a chat reply should all succeed without further configuration. A wrong key should show a readable error and leave the previous state intact.
 - vpapi async image contract: image generation and image editing should submit with `Prefer: respond-async`, poll the returned task id, and still work for models that take several minutes; a failed generation should surface the gateway's error message. The same generation flow should still work unchanged on a plain OpenAI-compatible gateway that ignores `Prefer` (synchronous response path).
 - vpapi video constraints: video resolution / duration options in the node settings panel should reflect the selected model's published limits (e.g. a model offering only 720p and 10–15s should not offer 1080p or 6s as valid selections), and the request should be sent within those limits.
