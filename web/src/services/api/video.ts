@@ -8,9 +8,6 @@ import { boolConfig, buildApiUrl, modelOptionName, resolveModelRequestConfig, re
 import { runModelPlugin } from "./model-plugin";
 import type { ReferenceImage } from "@/types/image";
 import type { ReferenceAudio, ReferenceVideo } from "@/types/media";
-// [vpapi-canvas] fork：生成前按网关价格提示本次消耗。
-import { generationCostNotice } from "@/product/vpapi/pricing";
-import { useProductStore } from "@/product/store";
 // [vpapi-canvas] fork：正式视频接口与公布的能力、任务终态保持一致。
 import { gatewayVideoOptions, gatewayVideoState } from "@/product/vpapi/media-contract";
 
@@ -76,7 +73,7 @@ export async function requestVideoGeneration(config: AiConfig, prompt: string, r
 
 export async function createVideoGenerationTask(config: AiConfig, prompt: string, references: ReferenceImage[] = [], options?: VideoMediaOptions): Promise<VideoGenerationTask> {
     const selectedModel = (config.model || config.videoModel).trim();
-    notifyModelCost(selectedModel, { seconds: Number(config.videoSeconds), resolution: config.vquality, hasReferences: references.length > 0 });
+
     const requestConfig = resolveModelRequestConfig(config, selectedModel);
     const script = resolveModelScript(config, selectedModel);
     if (script) return createPluginVideoTask(requestConfig, selectedModel, script, prompt, references, options);
@@ -470,8 +467,4 @@ function delay(ms: number, signal?: AbortSignal) {
     });
 }
 
-/** [vpapi-canvas] fork：按网关价格目录提示本次预计消耗（拿不到价格时静默）。 */
-function notifyModelCost(encodedModel: string, context: { seconds?: number; resolution?: string; hasReferences?: boolean }) {
-    const notice = generationCostNotice(encodedModel, context);
-    if (notice) useProductStore.getState().pushNotice(notice);
-}
+

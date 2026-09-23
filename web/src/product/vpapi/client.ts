@@ -6,7 +6,7 @@ import { applyChannels, buildApiUrl, createModelChannel, useConfigStore, type Ai
 
 import { GATEWAY_URL } from "../brand";
 import { cacheModelEndpoints } from "./model-endpoints";
-import { refreshModelPricing } from "./pricing";
+
 import { channelsOfGroup, channelPriority, createGroupChannelId, groupChannelName, groupOfChannel, KEY_GROUPS, sortGroupChannels, type KeyGroup } from "./slots";
 
 const text = (key: string, options?: Record<string, unknown>) => i18n.t(`product.connect.${key}`, options);
@@ -164,8 +164,6 @@ export async function addGatewayKey(apiKey: string, group: KeyGroup): Promise<nu
     const models = await connectGateway(key, channelId);
     const channel = createGatewayChannel(group, key, models, channelId);
     commitChannels(config, [...liveChannels(config), channel]);
-    // 价格目录用于生成前提示消耗；失败不影响接入本身。
-    await refreshModelPricing(key, channel.id).catch(() => null);
     return models.length;
 }
 
@@ -201,7 +199,6 @@ export async function reloadGatewayKey(channelId: string): Promise<number> {
     if (!group || !channel || !apiKey) throw new Error(text("missingKey"));
     const models = await connectGateway(apiKey, channelId);
     commitChannels(config, liveChannels(config).map((item) => (item.id === channelId ? createGatewayChannel(group, apiKey, models, channelId) : item)));
-    await refreshModelPricing(apiKey, channelId).catch(() => null);
     return models.length;
 }
 
@@ -218,7 +215,6 @@ export async function replaceGatewayKey(channelId: string, apiKey: string): Prom
     if (duplicate) throw new Error(duplicate);
     const models = await connectGateway(key, channelId);
     commitChannels(config, liveChannels(config).map((item) => (item.id === channelId ? createGatewayChannel(group, key, models, channelId) : item)));
-    await refreshModelPricing(key, channelId).catch(() => null);
     return models.length;
 }
 

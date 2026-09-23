@@ -7,7 +7,6 @@ import i18n from "@/i18n";
 // [vpapi-canvas] fork 专用：网关地址与接入分组来自产品层，避免在多处硬编码。
 import { GATEWAY_URL } from "@/product/brand";
 import { EMPTY_GROUP_CHANNEL_ID, groupOfChannel, primaryGatewayChannel, sortGroupChannels } from "@/product/vpapi/slots";
-import { modelPriceSummary } from "@/product/vpapi/pricing";
 
 export type ApiCallFormat = "openai" | "gemini" | "vpapi";
 export type ModelCapability = "image" | "video" | "text" | "audio";
@@ -391,10 +390,7 @@ export function modelOptionLabel(config: AiConfig, value: string) {
     const decoded = decodeChannelModel(value);
     if (!decoded) return value;
     const channel = config.channels.find((item) => item.id === decoded.channelId);
-    const label = channel ? `${decoded.model}（${channel.name}）` : decoded.model;
-    // [vpapi-canvas] fork：模型选择器里带上网关单价（拿不到价格时保持原样）。
-    const price = modelPriceSummary(value);
-    return price ? `${label} · ${price}` : label;
+    return channel ? `${decoded.model}（${channel.name}）` : decoded.model;
 }
 
 export function modelOptionsFromChannels(channels: ModelChannel[]) {

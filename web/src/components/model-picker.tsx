@@ -6,9 +6,8 @@ import i18n from "@/i18n";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import { modelOptionLabel, modelOptionName, selectableModelsByCapability, type AiConfig, type ModelCapability } from "@/stores/use-config-store";
-// [vpapi-canvas] fork：选项按 Key 分组，条目改成「模型名 + 单价」两行排版。
+// [vpapi-canvas] fork：选项按 Key 分组，条目只显示模型名。
 import { modelPickerGroups } from "@/product/vpapi/model-groups";
-import { modelPriceSummary } from "@/product/vpapi/pricing";
 
 type ModelPickerProps = {
     config: AiConfig;
@@ -62,12 +61,12 @@ export function ModelPicker({ config, value, onChange, capability, className, fu
                 title={current ? modelOptionLabel(config, current) : pickerPlaceholder}
             >
                 <ModelIcon model={current} />
-                {/* [vpapi-canvas] fork：收起状态只显示「模型名 · 单价」，Key 由弹层分组标题承担。 */}
-                <span className="canvas-model-picker-text min-w-0 flex-1 truncate text-left">{current ? modelPickerLabel(current) : pickerPlaceholder}</span>
+                {/* [vpapi-canvas] fork：收起状态只显示模型名，Key 由弹层分组标题承担。 */}
+                <span className="canvas-model-picker-text min-w-0 flex-1 truncate text-left">{current ? modelOptionName(current) : pickerPlaceholder}</span>
             </SelectTrigger>
             <SelectContent
                 data-canvas-no-zoom
-                /* [vpapi-canvas] fork：加宽弹层，避免长模型名 + 价格被裁切。 */
+                /* [vpapi-canvas] fork：加宽弹层，避免长模型名被裁切。 */
                 className="z-[1200] w-[22rem] max-w-[calc(100vw-24px)] rounded-xl border border-border/70 bg-popover p-1 shadow-xl"
                 position="popper"
                 align="start"
@@ -98,13 +97,6 @@ export function ModelPicker({ config, value, onChange, capability, className, fu
     );
 }
 
-/** [vpapi-canvas] fork：紧凑标签（模型名 · 单价），完整信息见 title。 */
-function modelPickerLabel(value: string) {
-    const name = modelOptionName(value);
-    const price = modelPriceSummary(value);
-    return price ? `${name} · ${price}` : name;
-}
-
 function emptyModelLabel(config: AiConfig, capability?: ModelCapability) {
     const label = capability ? i18n.t(`settingsPanels.model.capabilities.${capability}`) : "";
     if (capability && config.models.length) return i18n.t("settingsPanels.model.assign", { capability: label });
@@ -112,16 +104,12 @@ function emptyModelLabel(config: AiConfig, capability?: ModelCapability) {
 }
 
 function ModelLabel({ config, model }: { config: AiConfig; model: string }) {
-    // [vpapi-canvas] fork：两行排版 —— 模型名一行，单价一行，长名字不再挤成一团被截断。
+    // [vpapi-canvas] fork：模型名单独一行，长名字不再挤成一团被截断。
     const name = modelOptionName(model);
-    const price = modelPriceSummary(model);
     return (
-        <span className="flex min-w-0 items-start gap-2" title={modelOptionLabel(config, model)}>
+        <span className="flex min-w-0 items-center gap-2" title={modelOptionLabel(config, model)}>
             <ModelIcon model={model} />
-            <span className="flex min-w-0 flex-1 flex-col">
-                <span className="truncate">{name}</span>
-                {price ? <span className="text-xs text-muted-foreground">{price}</span> : null}
-            </span>
+            <span className="min-w-0 flex-1 truncate">{name}</span>
         </span>
     );
 }

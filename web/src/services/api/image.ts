@@ -9,9 +9,6 @@ import { dataUrlToFile, readImageMeta, readFileAsDataUrl } from "@/lib/image-uti
 import { buildImageReferencePromptText } from "@/lib/image-reference-prompt";
 import { imageToDataUrl } from "@/services/image-storage";
 import type { ReferenceImage } from "@/types/image";
-// [vpapi-canvas] fork：生成前按网关价格提示本次消耗。
-import { generationCostNotice } from "@/product/vpapi/pricing";
-import { useProductStore } from "@/product/store";
 // [vpapi-canvas] fork：轮询同时支持 JSON 作业和原生图片二进制。
 import { decodeGatewayImageResponse } from "@/product/vpapi/media-contract";
 
@@ -811,7 +808,6 @@ function parseGeminiImagePayload(payload: GeminiPayload) {
 export async function requestGeneration(config: AiConfig, prompt: string, options?: RequestOptions) {
     const requestConfig = resolveModelRequestConfig(config, config.model || config.imageModel);
     const n = Math.max(1, Math.min(15, Math.floor(Math.abs(Number(config.count)) || 1)));
-    notifyModelCost(config.model || config.imageModel, { count: n, quality: config.quality });
     const script = resolveModelScript(config, config.model || config.imageModel);
     if (script) {
         const quality = normalizeQuality(config.quality);
@@ -869,7 +865,6 @@ export async function requestGeneration(config: AiConfig, prompt: string, option
 export async function requestEdit(config: AiConfig, prompt: string, references: ReferenceImage[], mask?: ReferenceImage, options?: RequestOptions) {
     const requestConfig = resolveModelRequestConfig(config, config.model || config.imageModel);
     const n = Math.max(1, Math.min(15, Math.floor(Math.abs(Number(config.count)) || 1)));
-    notifyModelCost(config.model || config.imageModel, { count: n, quality: config.quality });
     const requestPrompt = buildImageReferencePromptText(prompt, references);
     const script = resolveModelScript(config, config.model || config.imageModel);
     if (script) {
@@ -1098,8 +1093,4 @@ const defaultGeminiConfig: Pick<AiConfig, "baseUrl" | "apiKey" | "apiFormat" | "
     systemPrompt: "",
 };
 
-/** [vpapi-canvas] fork：按网关价格目录提示本次预计消耗（拿不到价格时静默）。 */
-function notifyModelCost(encodedModel: string, options: { count?: number; seconds?: number; quality?: string; hasReferences?: boolean }) {
-    const notice = generationCostNotice(encodedModel, options);
-    if (notice) useProductStore.getState().pushNotice(notice);
-}
+

@@ -10,7 +10,7 @@ type ProductStore = {
     /** true = 沿用上游的本地 CLI Agent；false = 内置浏览器助手。 */
     useLocalAgent: boolean;
     setUseLocalAgent: (value: boolean) => void;
-    /** 轻量提示队列（例如生成前的额度提示），由 ProductNotices 渲染。 */
+    /** 轻量提示队列，由 ProductNotices 渲染。 */
     notice: { id: string; text: string } | null;
     pushNotice: (text: string) => void;
     clearNotice: () => void;

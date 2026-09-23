@@ -8,7 +8,6 @@ import { localForageStorage } from "@/lib/localforage-storage";
 import { modelOptionName, resolveModelRequestConfig, selectableModelsByCapability, useConfigStore, type AiConfig } from "@/stores/use-config-store";
 import { useAgentStore, type AgentChatItem, type AgentPendingToolCall } from "@/stores/use-agent-store";
 import { modelPickerGroups } from "@/product/vpapi/model-groups";
-import { modelPriceSummary } from "@/product/vpapi/pricing";
 
 import { PRODUCT_AGENT_PROMPT } from "./prompt";
 import { runAgentTurnWithFallback, type AgentToolCall, type TurnMessage } from "./protocol";
@@ -151,19 +150,12 @@ export function productAgentModels(): AgentModelChoices {
     const entries: AgentModelEntry[] = [];
     const options: AgentModelOption[] = [];
     for (const group of modelPickerGroups(config, selectableModelsByCapability(config, "text"))) {
-        const groupOptions = [...group.models].sort((a, b) => rank(a) - rank(b)).map((value) => ({ value, label: agentModelLabel(config, value) }));
+        const groupOptions = [...group.models].sort((a, b) => rank(a) - rank(b)).map((value) => ({ value, label: modelOptionName(value) }));
         options.push(...groupOptions);
         if (group.label) entries.push({ label: group.label, options: groupOptions });
         else entries.push(...groupOptions);
     }
     return { entries, options };
-}
-
-/** 选择器条目：模型名 · 单价（Key 已由分组标题说明，名字才不会被裁切）。 */
-function agentModelLabel(config: AiConfig, value: string) {
-    const name = modelOptionName(value);
-    const price = modelPriceSummary(value);
-    return price ? `${name} · ${price}` : name;
 }
 
 async function runLoop({ thread, request, navigate, signal }: { thread: ProductAgentThread; request: { baseUrl: string; apiKey: string; model: string; modelKey: string }; navigate: NavigateFunction; signal: AbortSignal }) {

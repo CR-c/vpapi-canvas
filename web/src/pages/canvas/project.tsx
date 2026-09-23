@@ -10,7 +10,7 @@ import { requestAudioGeneration, storeGeneratedAudio } from "@/services/api/audi
 import { requestVideoGeneration, storeGeneratedVideo } from "@/services/api/video";
 // [vpapi-canvas] fork：未完成的视频任务持久化，刷新后继续查询。
 import { rememberVideoTask } from "@/product/video-tasks";
-import { defaultConfig, useConfigStore, useEffectiveConfig } from "@/stores/use-config-store";
+import { defaultConfig, useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
 import { uploadImage } from "@/services/image-storage";
 import { uploadMediaFile } from "@/services/file-storage";
 import { nanoid } from "nanoid";
@@ -73,6 +73,8 @@ import { registerBuiltinNodes } from "@/components/canvas/nodes/builtin-nodes";
 import { CanvasPluginManagerModal } from "@/components/canvas/canvas-plugin-manager-modal";
 import { CanvasRefreshShell } from "@/components/canvas/canvas-refresh-shell";
 import { CanvasTopBar } from "@/components/canvas/canvas-top-bar";
+// [vpapi-canvas] fork：框选多张图片后共用一条提示词批量生成。
+import { CanvasBatchPrompt } from "@/product/ui/canvas-batch-prompt";
 import { ConnectionCreateMenu, NodeCreateMenu, type PendingConnectionCreate } from "@/components/canvas/canvas-create-menus";
 import {
     CanvasNodeType,
@@ -244,6 +246,8 @@ function InfiniteCanvasPage() {
     const [isNodeResizing, setIsNodeResizing] = useState(false);
     const [dropTargetGroupId, setDropTargetGroupId] = useState<string | null>(null);
     const [referencePickerNodeId, setReferencePickerNodeId] = useState<string | null>(null);
+    // [vpapi-canvas] fork：批量生成进行中时底部面板显示停止，runId 用来只中断这一批。
+    const [batchRunId, setBatchRunId] = useState<string | null>(null);
 
     const nodesRef = useRef(nodes);
     const connectionsRef = useRef(connections);
@@ -1299,7 +1303,7 @@ function InfiniteCanvasPage() {
         };
     }, [finishNodeDrag, handleGlobalMouseMove, handleGlobalMouseUp, handleGlobalPointerMove]);
 
-    const createImageFileNode = useCallback(async (file: File, position: Position) => {
+    const createImageFileNode = useCallback(async (file: File, position: Position, options?: { select?: boolean }) => {
         const image = await uploadImage(file);
         const size = fitNodeSize(image.width, image.height);
         const id = `image-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
@@ -1314,9 +1318,12 @@ function InfiniteCanvasPage() {
         };
 
         setNodes((prev) => [...prev, newNode]);
+        // [vpapi-canvas] fork：批量导入时由调用方统一选中，避免后一张盖掉前一张。
+        if (options?.select === false) return id;
         setSelectedNodeIds(new Set([id]));
         setSelectedConnectionId(null);
         setDialogNodeId(id);
+        return id;
     }, []);
 
     const createVideoFileNode = useCallback(async (file: File, position: Position) => {
@@ -1359,6 +1366,32 @@ function InfiniteCanvasPage() {
         setSelectedNodeIds(new Set([id]));
         setSelectedConnectionId(null);
     }, []);
+
+    // [vpapi-canvas] fork：多张图片一起导入时先不单独选中，全部落盘后再一次选中。
+    const placeImportedFiles = useCallback(
+        async (files: File[], positionAt: (index: number) => Position) => {
+            const imageIds: string[] = [];
+            for (let index = 0; index < files.length; index += 1) {
+                const file = files[index];
+                const position = positionAt(index);
+                if (isAudioFile(file)) {
+                    await createAudioFileNode(file, position);
+                } else if (file.type.startsWith("video/")) {
+                    await createVideoFileNode(file, position);
+                } else {
+                    const id = await createImageFileNode(file, position, { select: false });
+                    if (id) imageIds.push(id);
+                }
+            }
+            if (imageIds.length === 1) {
+                setSelectedNodeIds(new Set(imageIds));
+                setSelectedConnectionId(null);
+                setDialogNodeId(imageIds[0]);
+            }
+            return imageIds;
+        },
+        [createAudioFileNode, createImageFileNode, createVideoFileNode],
+    );
 
     const createTextNodeFromClipboard = useCallback(
         (text: string) => {
@@ -2035,41 +2068,33 @@ function InfiniteCanvasPage() {
                     setSelectedConnectionId(null);
                 }
 
-                // Create the remaining files near the target node.
-                for (let i = 0; i < rest.length; i++) {
-                    const offsetPos = { x: basePosition.x + (i + 1) * STAGGER, y: basePosition.y + (i + 1) * STAGGER };
-                    const f = rest[i];
-                    if (isAudioFile(f)) {
-                        void createAudioFileNode(f, offsetPos);
-                    } else if (f.type.startsWith("video/")) {
-                        void createVideoFileNode(f, offsetPos);
-                    } else {
-                        void createImageFileNode(f, offsetPos);
-                    }
+                // [vpapi-canvas] fork：替换后的图片节点也是一张图，和其余新图一起选中。
+                const extraIds = await placeImportedFiles(rest, (index) => ({ x: basePosition.x + (index + 1) * STAGGER, y: basePosition.y + (index + 1) * STAGGER }));
+                const replacedIsImage = !isAudioFile(first) && !first.type.startsWith("video/");
+                const batchIds = replacedIsImage ? [target.nodeId, ...extraIds] : extraIds;
+                if (batchIds.length > 1) {
+                    setSelectedNodeIds(new Set(batchIds));
+                    setDialogNodeId(null);
+                    setToolbarNodeId(null);
                 }
             } else {
-                // Without a replacement target, create all files near the canvas center.
-                for (let i = 0; i < files.length; i++) {
-                    const offsetPos = { x: basePosition.x + i * STAGGER, y: basePosition.y + i * STAGGER };
-                    const f = files[i];
-                    if (isAudioFile(f)) {
-                        void createAudioFileNode(f, offsetPos);
-                    } else if (f.type.startsWith("video/")) {
-                        void createVideoFileNode(f, offsetPos);
-                    } else {
-                        void createImageFileNode(f, offsetPos);
-                    }
+                // [vpapi-canvas] fork：一次导入的多张图片全部选中，写一条提示词即可逐张生成。
+                const importedIds = await placeImportedFiles(files, (index) => ({ x: basePosition.x + index * STAGGER, y: basePosition.y + index * STAGGER }));
+                if (importedIds.length > 1) {
+                    setSelectedNodeIds(new Set(importedIds));
+                    setDialogNodeId(null);
+                    setToolbarNodeId(null);
                 }
             }
 
             uploadTargetRef.current = null;
             event.target.value = "";
         },
-        [createAudioFileNode, createImageFileNode, createVideoFileNode, screenToCanvas, size.height, size.width],
+        [createImageFileNode, placeImportedFiles, screenToCanvas, size.height, size.width],
     );
 
     const handleDrop = useCallback(
-        (event: ReactDragEvent<HTMLDivElement>) => {
+        async (event: ReactDragEvent<HTMLDivElement>) => {
             event.preventDefault();
             const files = Array.from(event.dataTransfer.files).filter(
                 (item) => item.type.startsWith("image/") || item.type.startsWith("video/") || isAudioFile(item),
@@ -2078,19 +2103,15 @@ function InfiniteCanvasPage() {
 
             const basePos = screenToCanvas(event.clientX, event.clientY);
             const STAGGER = 40;
-            for (let i = 0; i < files.length; i++) {
-                const pos = { x: basePos.x + i * STAGGER, y: basePos.y + i * STAGGER };
-                const f = files[i];
-                if (isAudioFile(f)) {
-                    void createAudioFileNode(f, pos);
-                } else if (f.type.startsWith("video/")) {
-                    void createVideoFileNode(f, pos);
-                } else {
-                    void createImageFileNode(f, pos);
-                }
+            // [vpapi-canvas] fork：拖入多张图片时全部选中，底部直接出现共用提示词。
+            const importedIds = await placeImportedFiles(files, (index) => ({ x: basePos.x + index * STAGGER, y: basePos.y + index * STAGGER }));
+            if (importedIds.length > 1) {
+                setSelectedNodeIds(new Set(importedIds));
+                setDialogNodeId(null);
+                setToolbarNodeId(null);
             }
         },
-        [createAudioFileNode, createImageFileNode, createVideoFileNode, screenToCanvas],
+        [placeImportedFiles, screenToCanvas],
     );
 
     const startTitleEditing = useCallback(() => {
@@ -2728,6 +2749,77 @@ function InfiniteCanvasPage() {
 
     const retryBatchImage = useCallback((node: CanvasNodeData, imageId: string) => void handleRetryNode(node, imageId), [handleRetryNode]);
 
+    // [vpapi-canvas] fork：框选的多张图片共用一条提示词，每张各自生成一张结果。
+    const batchImageNodes = useMemo(
+        () => nodes.filter((node) => selectedNodeIds.has(node.id) && node.type === CanvasNodeType.Image && Boolean(node.metadata?.content)),
+        [nodes, selectedNodeIds],
+    );
+
+    const runBatchImageGeneration = useCallback(
+        async (prompt: string, batchConfig: AiConfig) => {
+            const sources = nodesRef.current.filter((node) => selectedNodeIdsRef.current.has(node.id) && node.type === CanvasNodeType.Image && node.metadata?.content);
+            const text = prompt.trim();
+            if (!sources.length || !text || batchRunId) return;
+            const generationConfig = { ...buildGenerationConfig(batchConfig, undefined, "image"), model: batchConfig.imageModel || batchConfig.model, count: "1" };
+            if (!isAiConfigReady(generationConfig, generationConfig.model)) {
+                openConfigDialog(true);
+                return;
+            }
+            const imageConfig = NODE_DEFAULT_SIZE[CanvasNodeType.Image];
+            const jobs = sources.map((source) => {
+                const childId = nanoid();
+                const reference = { id: source.id, name: `${source.title || source.id}.png`, type: source.metadata?.mimeType || "image/png", dataUrl: source.metadata?.content || "", storageKey: source.metadata?.storageKey };
+                const child: CanvasNodeData = {
+                    id: childId,
+                    type: CanvasNodeType.Image,
+                    title: text.slice(0, 32) || "Generated Image",
+                    position: { x: source.position.x + source.width + 96, y: source.position.y },
+                    width: imageConfig.width,
+                    height: imageConfig.height,
+                    metadata: { prompt: text, status: NODE_STATUS_LOADING, ...buildImageGenerationMetadata("edit", generationConfig, 1, [reference]) },
+                };
+                return { source, childId, reference, child };
+            });
+            const runId = nanoid();
+            setBatchRunId(runId);
+            setNodes((prev) => [...prev, ...jobs.map((job) => job.child)]);
+            setConnections((prev) => [...prev, ...jobs.map((job) => ({ id: nanoid(), fromNodeId: job.source.id, toNodeId: job.childId }))]);
+            setDialogNodeId(null);
+            const controller = startGenerationRequest(runId, runId, runId);
+            let failed = 0;
+            const limit = 3;
+            let cursor = 0;
+            const runOne = async () => {
+                while (cursor < jobs.length) {
+                    const job = jobs[cursor];
+                    cursor += 1;
+                    if (controller.signal.aborted) return;
+                    try {
+                        const image = await requestEdit(generationConfig, text, [job.reference], undefined, { signal: controller.signal }).then((items) => items[0]);
+                        if (controller.signal.aborted) return;
+                        const uploaded = await uploadImage(image.dataUrl, { signal: controller.signal });
+                        if (controller.signal.aborted) return;
+                        const size = fitNodeSize(uploaded.width, uploaded.height, imageConfig.width, imageConfig.height);
+                        setNodes((prev) => prev.map((item) => (item.id === job.childId && item.metadata?.status === NODE_STATUS_LOADING ? { ...item, width: size.width, height: size.height, metadata: { ...item.metadata, ...imageMetadata(uploaded), prompt: text, status: NODE_STATUS_SUCCESS, errorDetails: undefined } } : item)));
+                    } catch (error) {
+                        if (isGenerationCanceled(error) || controller.signal.aborted) return;
+                        failed += 1;
+                        const errorDetails = error instanceof Error ? error.message : t("canvas.projectPage.generationFailed");
+                        setNodes((prev) => prev.map((item) => (item.id === job.childId && item.metadata?.status === NODE_STATUS_LOADING ? { ...item, metadata: { ...item.metadata, status: NODE_STATUS_ERROR, errorDetails } } : item)));
+                    }
+                }
+            };
+            try {
+                await Promise.all(Array.from({ length: Math.min(limit, jobs.length) }, runOne));
+                if (!controller.signal.aborted && failed) message.error(t("product.batch.partial", { count: failed }));
+            } finally {
+                finishGenerationRequest(runId, controller);
+                setBatchRunId((current) => (current === runId ? null : current));
+            }
+        },
+        [batchRunId, finishGenerationRequest, isAiConfigReady, message, openConfigDialog, startGenerationRequest, t],
+    );
+
     const generateImageFromTextNode = useCallback(
         (node: CanvasNodeData) => {
             const prompt = (node.metadata?.content || node.metadata?.prompt || "").trim();
@@ -3102,6 +3194,10 @@ function InfiniteCanvasPage() {
                     onToggleFreeResize={(node) => toggleNodeFreeResize(node.id)}
                     onDelete={(node) => deleteNodes(new Set([node.id]))}
                 />
+
+                {batchImageNodes.length > 1 ? (
+                    <CanvasBatchPrompt count={batchImageNodes.length} running={Boolean(batchRunId)} onGenerate={(prompt, config) => void runBatchImageGeneration(prompt, config)} onStop={() => batchRunId && stopGenerationByRunningId(batchRunId)} />
+                ) : null}
 
                 <CanvasToolbar
                     selectedCount={selectedNodeIds.size}

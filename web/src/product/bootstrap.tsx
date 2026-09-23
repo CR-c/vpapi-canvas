@@ -67,7 +67,7 @@ export function ProductOverlays() {
     );
 }
 
-/** 把产品层的提示（如生成前额度提示）交给 antd message 渲染。 */
+/** 把产品层的提示交给 antd message 渲染。 */
 export function ProductNotices() {
     const { message } = App.useApp();
     const notice = useProductStore((state) => state.notice);
