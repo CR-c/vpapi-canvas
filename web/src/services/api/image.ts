@@ -183,6 +183,11 @@ function resolveSize(quality: string | undefined, ratio: string): string {
     return `${width}x${height}`;
 }
 
+// [vpapi-canvas] fork：设置页把「默认分辨率 + 默认画幅」组合成默认尺寸时复用同一套换算。
+export function resolveImageSize(quality: string, ratio: string) {
+    return resolveSize(normalizeQuality(quality), ratio);
+}
+
 function parseRatioValue(value: string) {
     const parts = value.split(":");
     if (parts.length !== 2) throw new Error(apiText("invalidImageSizeFormat"));

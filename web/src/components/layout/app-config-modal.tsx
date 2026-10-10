@@ -17,6 +17,7 @@ import { audioFormatOptions, audioVoiceOptions, normalizeAudioSpeedValue } from 
 // [vpapi-canvas] fork：渠道页换成 vpapi 接入面板。
 import { PRODUCT_FLAGS } from "@/product/flags";
 import { ChannelsPanel } from "@/product/ui/channels-panel";
+import { ImageDefaults } from "@/product/ui/image-defaults";
 import { createModelChannel, applyChannels, useConfigStore, type AiConfig, type ApiCallFormat, type ConfigTabKey, type ModelCapability, type ModelChannel } from "@/stores/use-config-store";
 
 type ModelGroup = {
@@ -244,6 +245,8 @@ export function AppConfigPanel({ showDoneButton = false, initialTab = "channels"
                                             onBlur={(event) => updateConfig("canvasImageCount", normalizeImageCount(event.target.value))}
                                         />
                                     </Form.Item>
+                                    {/* [vpapi-canvas] fork：生图默认质量 / 分辨率 / 画幅。 */}
+                                    <ImageDefaults />
                                     <Form.Item label={t("config.preferences.audioVoice")} className="mb-4">
                                         <Select value={config.audioVoice} options={audioVoiceOptions} onChange={(value) => updateConfig("audioVoice", value)} />
                                     </Form.Item>

@@ -30,13 +30,13 @@ fork 的第一目标是「既要专用，又要随时能合上游」——上游
 | --- | --- | --- |
 | `web/src/stores/use-config-store.ts` | 默认配置、`merge`、协议规范化统一过 `lockProductConfig()`；接入渠道按「文生 / 媒体」两组归一化（组内顺序即优先级）；默认模型按能力校验；视频分辨率挡位吸附规则 | 锁定 vpapi 协议与官方网关地址；网关能力标签是模型分类的唯一来源，网关没公布的挡位按用户手填发送 |
 | `web/src/components/layout/client-root-init.tsx` | 挂载 `useProductBootstrap()` 与产品浮层 | 首启引导、`?apiKey=` 一键接入、品牌文案注入 |
-| `web/src/components/layout/app-config-modal.tsx` | 渠道页渲染 `ProductChannelsPanel` | 替换渠道管理 / 协议下拉 / 模型脚本入口 |
+| `web/src/components/layout/app-config-modal.tsx` | 渠道页渲染 `ProductChannelsPanel`；偏好设置「生成偏好」插入生图默认质量 / 分辨率 / 画幅（产品组件 `ImageDefaults`） | 替换渠道管理 / 协议下拉 / 模型脚本入口；生图默认值集中到设置页配置 |
 | `web/src/components/layout/app-top-nav.tsx` | 插入 `QuotaChip` | 展示 Key 剩余额度 |
 | `web/src/components/agent/agent-panel.tsx` | 默认渲染内置 Agent，可切回本地 CLI Agent | 让 vpapi 用户直接用上助手 |
 | `web/src/components/layout/github-link.tsx`、`web/src/hooks/use-version-check.ts` | 指向 fork 仓库 / 关闭上游更新检查 | 品牌与更新源 |
 | `web/index.html`、`web/public/logo.svg` | 站点标题、图标 | 品牌 |
 | `web/src/services/api/video.ts` | `metadata.url` 结果链接、瞬时错误重试、取回降级链；产品层判定任务终态并发送已公布的音轨 / 水印参数 | 生成结果可靠性（上游未含） |
-| `web/src/services/api/image.ts` | vpapi 异步图像任务；模型目录读取回调与原始错误透传 | 一次模型读取同时更新端点缓存，保留鉴权 / 限流错误分类 |
+| `web/src/services/api/image.ts` | vpapi 异步图像任务；模型目录读取回调与原始错误透传；导出 `resolveImageSize` 供设置页组合默认分辨率与画幅 | 一次模型读取同时更新端点缓存，保留鉴权 / 限流错误分类；默认尺寸与生成端换算保持一致 |
 | `web/src/components/video-settings-panel.tsx` | 分辨率输入框按像素值展示当前挡位 | 网关挡位带 `p` / `4k` 后缀，数字输入框无法解析会显示为空 |
 | `web/src/components/model-picker.tsx` | 选项按接入 Key 分组渲染，条目只显示模型名并加宽弹层 | 长模型名拼在一行时经常被裁切遮挡；分组后才能先看到 Key 再选模型 |
 | `web/src/pages/canvas/project.tsx` | 框选或一次导入多张有内容的图片时，底部出现共用提示词面板，一次为每张图各生成一张结果 | 大量图片用同一句话处理时不用逐张打开节点 |
